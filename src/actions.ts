@@ -1,29 +1,31 @@
 import type ModuleInstance from './main.js'
+import { suiteId } from './main.js'
 import { buildButtonMapping, buildGpi, buildPbusRecall, buildPbusTrigger, buildRun } from './legacy-actions.js'
 
-type NumberOption = { options: { value: number } }
-type EmptyOptions = { options: Record<string, never> }
+type SuiteOption = { suite?: string }
+type NumberOption = { options: SuiteOption & { value: number } }
+type SuiteOnly = { options: SuiteOption }
 
 export type ActionsSchema = {
-	connect: EmptyOptions
-	disconnect: EmptyOptions
-	connection_toggle: EmptyOptions
+	connect: SuiteOnly
+	disconnect: SuiteOnly
+	connection_toggle: SuiteOnly
 	macro_play: NumberOption
 	macro_stop: NumberOption
-	macro_stop_all: EmptyOptions
-	aux_route: { options: { aux: number; source: number; transition: string } }
-	crosspoint: { options: { target: string; source: number } }
-	emem: { options: { target: string; register: number } }
-	transition: { options: { target: string; transition: string } }
+	macro_stop_all: SuiteOnly
+	aux_route: { options: SuiteOption & { aux: number; source: number; transition: string } }
+	crosspoint: { options: SuiteOption & { target: string; source: number } }
+	emem: { options: SuiteOption & { target: string; register: number } }
+	transition: { options: SuiteOption & { target: string; transition: string } }
 	panel_memory: NumberOption
-	image_store: { options: { output: number; image: number } }
+	image_store: { options: SuiteOption & { output: number; image: number } }
 	image_store_input: NumberOption
-	raw_cpl: { options: { command: string } }
-	run: { options: { target: string } }
+	raw_cpl: { options: SuiteOption & { command: string } }
+	run: { options: SuiteOption & { target: string } }
 	gpi: NumberOption
-	pbus_recall: { options: { pbus: number; register: number } }
-	pbus_trigger: { options: { pbus: number; trigger: number } }
-	button_mapping: { options: { bus: string; shift: number; button: number; source: number } }
+	pbus_recall: { options: SuiteOption & { pbus: number; register: number } }
+	pbus_trigger: { options: SuiteOption & { pbus: number; trigger: number } }
+	button_mapping: { options: SuiteOption & { bus: string; shift: number; button: number; source: number } }
 }
 
 const meIndexes: Record<string, number> = { PGM: 3, ME1: 0, ME2: 1, ME3: 2, ME4: 4 }
@@ -51,35 +53,60 @@ function resultOrThrow(result: { success: boolean; message: string }): void {
 
 export function UpdateActions(self: ModuleInstance): void {
 	const p = self.protocol
+	const suiteOption = {
+		id: 'suite' as const,
+		type: 'dropdown' as const,
+		label: 'Suite',
+		default: 'suite1a',
+		choices: [
+			{ id: 'suite1a', label: 'Suite 1' },
+			{ id: 'suite2a', label: 'Suite 2' },
+			{ id: 'suite3a', label: 'Suite 3' },
+			{ id: 'suite4a', label: 'Suite 4' },
+		],
+	}
+	const id = (e: { options: { suite?: string } }) => self.connectionId(suiteId(e.options.suite))
 	self.setActionDefinitions({
-		connect: { name: 'Connection: Connect', options: [], callback: async () => self.connectFrame() },
-		disconnect: { name: 'Connection: Disconnect', options: [], callback: async () => self.disconnectFrame() },
+		connect: {
+			name: 'Connection: Connect',
+			options: [suiteOption],
+			callback: async (e) => self.connectSuite(e.options.suite),
+		},
+		disconnect: {
+			name: 'Connection: Disconnect',
+			options: [suiteOption],
+			callback: async (e) => self.disconnectSuite(e.options.suite),
+		},
 		connection_toggle: {
 			name: 'Connection: Connect / Disconnect',
-			options: [],
-			callback: async () =>
-				self.connectionStatus === 'connected' || self.connectionStatus === 'connecting'
-					? self.disconnectFrame()
-					: self.connectFrame(),
+			options: [suiteOption],
+			callback: async (e) => {
+				const suite = suiteId(e.options.suite),
+					status = self.suiteStates[suite].status
+				return status === 'connected' || status === 'connecting'
+					? self.disconnectSuite(suite)
+					: self.connectSuite(suite)
+			},
 		},
 		macro_play: {
 			name: 'Macro: Play / Continue',
-			options: [{ id: 'value', type: 'number', label: 'Macro', default: 1, min: 1, max: 999 }],
-			callback: (e) => resultOrThrow(p.raw.sendMacro(p.id, Number(e.options.value))),
+			options: [suiteOption, { id: 'value', type: 'number', label: 'Macro', default: 1, min: 1, max: 999 }],
+			callback: (e) => resultOrThrow(p.sendMacro(id(e), Number(e.options.value))),
 		},
 		macro_stop: {
 			name: 'Macro: Stop',
-			options: [{ id: 'value', type: 'number', label: 'Macro', default: 1, min: 1, max: 999 }],
-			callback: (e) => resultOrThrow(p.raw.sendMacroStop(p.id, Number(e.options.value))),
+			options: [suiteOption, { id: 'value', type: 'number', label: 'Macro', default: 1, min: 1, max: 999 }],
+			callback: (e) => resultOrThrow(p.sendMacroStop(id(e), Number(e.options.value))),
 		},
 		macro_stop_all: {
 			name: 'Macro: Stop All',
-			options: [],
-			callback: () => resultOrThrow(p.raw.sendMacroStopAll(p.id)),
+			options: [suiteOption],
+			callback: (e) => resultOrThrow(p.sendMacroStopAll(id(e))),
 		},
 		aux_route: {
 			name: 'AUX: Route Source',
 			options: [
+				suiteOption,
 				{ id: 'aux', type: 'number', label: 'AUX', default: 1, min: 1, max: 96 },
 				{ id: 'source', type: 'number', label: 'Source', default: 1, min: 1, max: 850 },
 				{
@@ -96,12 +123,13 @@ export function UpdateActions(self: ModuleInstance): void {
 			],
 			callback: (e) =>
 				resultOrThrow(
-					p.raw.sendAuxRoute(p.id, Number(e.options.aux), Number(e.options.source), String(e.options.transition)),
+					p.sendAuxRoute(id(e), Number(e.options.aux), Number(e.options.source), String(e.options.transition)),
 				),
 		},
 		crosspoint: {
 			name: 'Crosspoint: Route Source',
 			options: [
+				suiteOption,
 				{ id: 'target', type: 'dropdown', label: 'Bus / Keyer', default: 'PGM_A', choices: crosspointChoices },
 				{ id: 'source', type: 'number', label: 'Source', default: 1, min: 1, max: 809 },
 			],
@@ -113,8 +141,8 @@ export function UpdateActions(self: ModuleInstance): void {
 				const offset = key ? (Number(key[1]) - 1) * 0x10 : ['A', 'B', 'C', 'D'].indexOf(bus) * 0x10
 				if (offset < 0) throw new Error('Invalid crosspoint bus')
 				resultOrThrow(
-					p.raw.sendCrosspoint(
-						p.id,
+					p.sendCrosspoint(
+						id(e),
 						key ? 0x103a : 0x104a,
 						(key ? 0x08000000 : 0x04000000) + offset + index,
 						Number(e.options.source),
@@ -125,23 +153,25 @@ export function UpdateActions(self: ModuleInstance): void {
 		emem: {
 			name: 'E-MEM: Recall',
 			options: [
+				suiteOption,
 				{ id: 'target', type: 'dropdown', label: 'Target', default: 'MASTER', choices: ememChoices },
 				{ id: 'register', type: 'number', label: 'Register', default: 0, min: 0, max: 999 },
 			],
 			callback: (e) => {
 				const target = String(e.options.target),
 					register = Number(e.options.register)
-				if (target === 'MASTER') return resultOrThrow(p.raw.sendEMem(p.id, register))
+				if (target === 'MASTER') return resultOrThrow(p.sendEMem(id(e), register))
 				const [me, modeName] = target.split('-')
 				const index = me === 'eDPM' ? 10 : meIndexes[me]
 				const mode = { PRI: 0, SEC: 1, BOTH: 2 }[modeName]
 				if (index === undefined || mode === undefined) throw new Error('Invalid E-MEM target')
-				resultOrThrow(p.raw.sendEMemTargeted(p.id, register, 0x02000000 + index, mode))
+				resultOrThrow(p.sendEMemTargeted(id(e), register, 0x02000000 + index, mode))
 			},
 		},
 		transition: {
 			name: 'Transition: Cut / Auto',
 			options: [
+				suiteOption,
 				{ id: 'target', type: 'dropdown', label: 'Target', default: 'PGM_PRI', choices: transitionChoices },
 				{
 					id: 'transition',
@@ -162,65 +192,71 @@ export function UpdateActions(self: ModuleInstance): void {
 				const did = key
 					? 0x08000000 + (Number(key[1]) - 1) * 0x10 + index
 					: 0x03000000 + (bus === 'SEC' ? 0x10 : 0) + index
-				resultOrThrow(p.raw.sendTransitionEvent(p.id, String(e.options.transition) === 'cut' ? 0x44 : 0x43, did))
+				resultOrThrow(p.sendTransitionEvent(id(e), String(e.options.transition) === 'cut' ? 0x44 : 0x43, did))
 			},
 		},
 		panel_memory: {
 			name: 'Panel Memory: Recall',
-			options: [{ id: 'value', type: 'number', label: 'Register', default: 1, min: 1, max: 99 }],
-			callback: (e) => resultOrThrow(p.raw.sendPanelMem(p.id, Number(e.options.value))),
+			options: [suiteOption, { id: 'value', type: 'number', label: 'Register', default: 1, min: 1, max: 99 }],
+			callback: (e) => resultOrThrow(p.sendPanelMem(id(e), Number(e.options.value))),
 		},
 		image_store: {
 			name: 'Image Store: Select Image',
 			options: [
+				suiteOption,
 				{ id: 'output', type: 'number', label: 'Output', default: 1, min: 1, max: 10 },
 				{ id: 'image', type: 'number', label: 'Image', default: 1, min: 1, max: 8999 },
 			],
-			callback: (e) => resultOrThrow(p.raw.sendImageStore(p.id, Number(e.options.output), Number(e.options.image))),
+			callback: (e) => resultOrThrow(p.sendImageStore(id(e), Number(e.options.output), Number(e.options.image))),
 		},
 		image_store_input: {
 			name: 'Image Store: Select Input',
-			options: [{ id: 'value', type: 'number', label: 'Input', default: 1, min: 1, max: 850 }],
-			callback: (e) => resultOrThrow(p.raw.sendImageStoreInput(p.id, Number(e.options.value))),
+			options: [suiteOption, { id: 'value', type: 'number', label: 'Input', default: 1, min: 1, max: 850 }],
+			callback: (e) => resultOrThrow(p.sendImageStoreInput(id(e), Number(e.options.value))),
 		},
 		raw_cpl: {
 			name: 'Advanced: Send Raw CPL',
-			options: [{ id: 'command', type: 'textinput', label: 'Hex command', default: '' }],
-			callback: (e) => resultOrThrow(p.raw.sendRawCommand(p.id, String(e.options.command))),
+			options: [suiteOption, { id: 'command', type: 'textinput', label: 'Hex command', default: '' }],
+			callback: (e) => resultOrThrow(p.sendRawCommand(id(e), String(e.options.command))),
 		},
 		run: {
 			name: 'Timeline: RUN',
-			options: [{ id: 'target', type: 'dropdown', label: 'Target', default: 'MASTER', choices: runChoices }],
-			callback: (e) => resultOrThrow(p.raw.sendRawCommand(p.id, buildRun(String(e.options.target)))),
+			options: [
+				suiteOption,
+				{ id: 'target', type: 'dropdown', label: 'Target', default: 'MASTER', choices: runChoices },
+			],
+			callback: (e) => resultOrThrow(p.sendRawCommand(id(e), buildRun(String(e.options.target)))),
 		},
 		gpi: {
 			name: 'GPI: Fire',
-			options: [{ id: 'value', type: 'number', label: 'GPI', default: 1, min: 1, max: 40 }],
-			callback: (e) => resultOrThrow(p.raw.sendRawCommand(p.id, buildGpi(Number(e.options.value)))),
+			options: [suiteOption, { id: 'value', type: 'number', label: 'GPI', default: 1, min: 1, max: 40 }],
+			callback: (e) => resultOrThrow(p.sendRawCommand(id(e), buildGpi(Number(e.options.value)))),
 		},
 		pbus_recall: {
 			name: 'PBUS: Recall Register',
 			options: [
+				suiteOption,
 				{ id: 'pbus', type: 'number', label: 'PBUS', default: 1, min: 1, max: 24 },
 				{ id: 'register', type: 'number', label: 'Register', default: 0, min: 0, max: 299 },
 			],
 			callback: async (e) => {
 				const commands = buildPbusRecall(Number(e.options.pbus), Number(e.options.register))
-				resultOrThrow(p.raw.sendRawCommand(p.id, commands[0]))
+				resultOrThrow(p.sendRawCommand(id(e), commands[0]))
 				await new Promise((resolve) => setTimeout(resolve, 50))
-				resultOrThrow(p.raw.sendRawCommand(p.id, commands[1]))
+				resultOrThrow(p.sendRawCommand(id(e), commands[1]))
 			},
 		},
 		pbus_trigger: {
 			name: 'PBUS: Fire Trigger',
 			options: [
+				suiteOption,
 				{ id: 'pbus', type: 'number', label: 'PBUS', default: 1, min: 1, max: 24 },
 				{ id: 'trigger', type: 'number', label: 'Trigger', default: 0, min: 0, max: 12 },
 			],
 			callback: async (e) => {
 				const [clear, select, fire] = buildPbusTrigger(Number(e.options.pbus), Number(e.options.trigger))
 				for (const command of [clear, select, fire, clear]) {
-					resultOrThrow(p.raw.sendRawCommand(p.id, command))
+					resultOrThrow(p.sendRawCommand(id(e), command))
 					await new Promise((resolve) => setTimeout(resolve, 50))
 				}
 			},
@@ -228,6 +264,7 @@ export function UpdateActions(self: ModuleInstance): void {
 		button_mapping: {
 			name: 'Panel: Map Button to Source',
 			options: [
+				suiteOption,
 				{
 					id: 'bus',
 					type: 'dropdown',
@@ -248,8 +285,8 @@ export function UpdateActions(self: ModuleInstance): void {
 			],
 			callback: (e) =>
 				resultOrThrow(
-					p.raw.sendRawCommand(
-						p.id,
+					p.sendRawCommand(
+						id(e),
 						buildButtonMapping(
 							String(e.options.bus),
 							Number(e.options.shift),

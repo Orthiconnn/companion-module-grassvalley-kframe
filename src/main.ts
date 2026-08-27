@@ -7,7 +7,26 @@ import { UpdateFeedbacks, type FeedbacksSchema } from './feedbacks.js'
 import { UpdatePresets } from './presets.js'
 import { protocol, type CommandResult } from './protocol.js'
 
-const CONNECTION_ID = 'frame'
+export const SUITES = ['suite1a', 'suite2a', 'suite3a', 'suite4a'] as const
+export type SuiteId = (typeof SUITES)[number]
+export type SuiteState = {
+	status: string
+	frameVersion: string
+	protocolName: string
+	heartbeatFlash: boolean
+	timer?: NodeJS.Timeout
+}
+
+export function suiteId(value: unknown): SuiteId {
+	return SUITES.includes(value as SuiteId) ? (value as SuiteId) : 'suite1a'
+}
+export function suiteNumber(id: SuiteId): number {
+	return Number(id[5])
+}
+export function suitePorts(id: SuiteId): [number, number] {
+	const main = 6130 + suiteNumber(id) * 2
+	return [main, main + 1]
+}
 
 export type ModuleSchema = {
 	config: ModuleConfig
@@ -21,11 +40,9 @@ export { UpgradeScripts }
 
 export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	config!: ModuleConfig // Setup in init()
-	connectionStatus = 'disconnected'
-	frameVersion = ''
-	protocolName = ''
-	heartbeatFlash = false
-	private heartbeatFlashTimer: NodeJS.Timeout | undefined
+	readonly suiteStates = Object.fromEntries(
+		SUITES.map((id) => [id, { status: 'disconnected', frameVersion: '', protocolName: '', heartbeatFlash: false }]),
+	) as Record<SuiteId, SuiteState>
 
 	constructor(internal: unknown) {
 		super(internal)
@@ -41,88 +58,86 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.updatePresets() // export Presets
 		this.updateVariableDefinitions() // export variable definitions
 		this.updateRuntimeState()
-		if (config.autoConnect !== false && config.host) await this.connectFrame()
 	}
 	// When module gets deleted
 	async destroy(): Promise<void> {
-		if (this.heartbeatFlashTimer) clearTimeout(this.heartbeatFlashTimer)
+		for (const state of Object.values(this.suiteStates)) if (state.timer) clearTimeout(state.timer)
 		protocol.clientEmitter.off('status', this.handleProtocolStatus)
-		await protocol.disconnectConnection(CONNECTION_ID)
+		await Promise.all(SUITES.map(async (id) => protocol.disconnectConnection(this.connectionId(id))))
 	}
 
 	async configUpdated(config: ModuleConfig): Promise<void> {
 		this.config = config
-		await protocol.disconnectConnection(CONNECTION_ID)
-		this.connectionStatus = 'disconnected'
+		await Promise.all(SUITES.map(async (id) => protocol.disconnectConnection(this.connectionId(id))))
+		for (const id of SUITES)
+			this.suiteStates[id] = { status: 'disconnected', frameVersion: '', protocolName: '', heartbeatFlash: false }
 		this.updateRuntimeState()
-		if (config.autoConnect !== false && config.host) await this.connectFrame()
 	}
 
 	private handleProtocolStatus = (connectionId: string, type: string, message: unknown): void => {
-		if (connectionId !== CONNECTION_ID) return
+		const id = SUITES.find((suite) => this.connectionId(suite) === connectionId)
+		if (!id) return
+		const state = this.suiteStates[id]
 		if (type === 'CONNECTED') {
-			this.connectionStatus = 'connected'
-			const info = protocol.getConnectionInfo(CONNECTION_ID)
-			this.frameVersion = info?.frameVersion ?? ''
-			this.protocolName = info?.protocol?.toUpperCase() ?? ''
-			this.updateStatus(InstanceStatus.Ok)
-			protocol.subscribeToSourceNames(CONNECTION_ID)
-			setTimeout(() => protocol.subscribeToAuxBus(CONNECTION_ID), 200)
-			setTimeout(() => protocol.subscribeToMEBus(CONNECTION_ID), 400)
+			state.status = 'connected'
+			const protocolId = this.connectionId(id)
+			const info = protocol.getConnectionInfo(protocolId)
+			state.frameVersion = info?.frameVersion ?? ''
+			state.protocolName = info?.protocol?.toUpperCase() ?? ''
+			protocol.subscribeToSourceNames(protocolId)
+			setTimeout(() => protocol.subscribeToAuxBus(protocolId), 200)
+			setTimeout(() => protocol.subscribeToMEBus(protocolId), 400)
 		} else if (type === 'HEARTBEAT_ACK') {
-			this.heartbeatFlash = true
+			state.heartbeatFlash = true
 			this.checkFeedbacks('connection_state')
-			if (this.heartbeatFlashTimer) clearTimeout(this.heartbeatFlashTimer)
-			this.heartbeatFlashTimer = setTimeout(() => {
-				this.heartbeatFlash = false
+			if (state.timer) clearTimeout(state.timer)
+			state.timer = setTimeout(() => {
+				state.heartbeatFlash = false
 				this.checkFeedbacks('connection_state')
 			}, 300)
 		} else if (type === 'FRAME_VERSION' && message && typeof message === 'object' && 'version' in message) {
-			this.frameVersion = String(message.version)
+			state.frameVersion = String(message.version)
 		} else if (['ERROR', 'DISCONNECTED', 'HANDSHAKE_TIMEOUT_ERROR', 'HEARTBEAT_TIMEOUT'].includes(type)) {
-			this.connectionStatus = 'disconnected'
+			state.status = 'disconnected'
 			const detail = typeof message === 'string' ? message : type
-			this.updateStatus(InstanceStatus.ConnectionFailure, detail)
+			this.log('warn', `Suite ${suiteNumber(id)}: ${detail}`)
 		} else if (type === 'CONNECTING' || type === 'HANDSHAKE_COMPLETE') {
-			this.connectionStatus = 'connecting'
-			this.updateStatus(InstanceStatus.Connecting)
+			state.status = 'connecting'
 		}
 		this.updateRuntimeState()
 	}
 
-	async connectFrame(): Promise<void> {
+	async connectSuite(value: unknown): Promise<void> {
+		const id = suiteId(value)
+		const state = this.suiteStates[id]
 		if (!this.config.host) {
 			this.updateStatus(InstanceStatus.BadConfig, 'Target IP is required')
 			return
 		}
-		this.connectionStatus = 'connecting'
-		this.updateStatus(InstanceStatus.Connecting)
+		state.status = 'connecting'
 		this.updateRuntimeState()
 		try {
-			const suite = this.config.suite || 'suite1a'
-			const [mainPort, listenerPort] = this.suitePorts
+			const [mainPort, listenerPort] = suitePorts(id)
 			await protocol.createConnection(
-				CONNECTION_ID,
+				this.connectionId(id),
 				this.config.host,
-				suite,
+				id,
 				{ mainPort, listenerPort },
-				suite.replace('suite', 'Suite ').replace('a', ''),
+				`Suite ${suiteNumber(id)}`,
 				'2026.0.9.1',
 				'Aug 27 2026',
 			)
 		} catch (error) {
-			this.connectionStatus = 'disconnected'
-			this.updateStatus(InstanceStatus.ConnectionFailure, String(error))
+			state.status = 'disconnected'
+			this.log('warn', `Suite ${suiteNumber(id)}: ${String(error)}`)
 			this.updateRuntimeState()
 		}
 	}
 
-	async disconnectFrame(): Promise<void> {
-		await protocol.disconnectConnection(CONNECTION_ID)
-		this.connectionStatus = 'disconnected'
-		this.frameVersion = ''
-		this.protocolName = ''
-		this.updateStatus(InstanceStatus.Disconnected)
+	async disconnectSuite(value: unknown): Promise<void> {
+		const id = suiteId(value)
+		await protocol.disconnectConnection(this.connectionId(id))
+		this.suiteStates[id] = { status: 'disconnected', frameVersion: '', protocolName: '', heartbeatFlash: false }
 		this.updateRuntimeState()
 	}
 
@@ -132,22 +147,36 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	}
 
 	private updateRuntimeState(): void {
-		this.setVariableValues({
-			connection_status: this.connectionStatus,
-			protocol: this.protocolName,
-			frame_version: this.frameVersion,
-		})
+		const statuses = Object.values(this.suiteStates).map((state) => state.status)
+		this.updateStatus(
+			statuses.includes('connected')
+				? InstanceStatus.Ok
+				: statuses.includes('connecting')
+					? InstanceStatus.Connecting
+					: InstanceStatus.Disconnected,
+		)
+		this.setVariableValues(
+			Object.fromEntries(
+				SUITES.flatMap((id) => {
+					const n = suiteNumber(id),
+						state = this.suiteStates[id]
+					return [
+						[`suite${n}_connection_status`, state.status],
+						[`suite${n}_protocol`, state.protocolName],
+						[`suite${n}_frame_version`, state.frameVersion],
+					]
+				}),
+			),
+		)
 		this.checkFeedbacks('connected', 'connection_state', 'macro_active')
 	}
 
-	get suitePorts(): [number, number] {
-		const suiteNumber = Number(/^suite([1-4])a$/.exec(this.config.suite || 'suite1a')?.[1] ?? 1)
-		const mainPort = 6130 + suiteNumber * 2
-		return [mainPort, mainPort + 1]
+	get protocol(): typeof protocol {
+		return protocol
 	}
 
-	get protocol(): ProtocolManagerFacade {
-		return { raw: protocol, id: CONNECTION_ID }
+	connectionId(id: SuiteId): string {
+		return `${this.id}:${id}`
 	}
 
 	// Return config fields for web config
@@ -171,5 +200,3 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		UpdateVariableDefinitions(this)
 	}
 }
-
-export type ProtocolManagerFacade = { raw: typeof protocol; id: typeof CONNECTION_ID }

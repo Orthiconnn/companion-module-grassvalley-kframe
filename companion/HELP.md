@@ -6,9 +6,9 @@ This development release ports the verified GV Macro Player Stream Deck v2026.3.
 
 ## Configuration
 
-Enter the K-Frame IP address and select the suite. Ports are fixed in code and cannot be changed by the user: 6132/6133 for Suite 1, 6134/6135 for Suite 2, 6136/6137 for Suite 3, and 6138/6139 for Suite 4.
+Enter only the K-Frame IP address. Ports are fixed in code and cannot be changed by the user: 6132/6133 for Suite 1, 6134/6135 for Suite 2, 6136/6137 for Suite 3, and 6138/6139 for Suite 4.
 
-One Companion connection represents one suite. To reproduce the four suite buttons shown in the Stream Deck profile, add four module connections and select Suite 1, Suite 2, Suite 3, and Suite 4 respectively. Each instance's live connection preset changes from red **Not Connected**, through amber **Connecting / Establishing Heartbeat**, to green **Connected**, and displays the live frame protocol/port, frame version, and heartbeat activity. The fixed suite ports above remain the non-editable local client bindings.
+The module never connects automatically. Use the four Suite 1–4 connection buttons, or choose a suite in a manually configured connection action. Each suite is independent and its live button changes from red **Not Connected**, through amber **Connecting / Establishing Heartbeat**, to green **Connected**. It displays the live frame protocol/port, frame version, and heartbeat activity. Every operational action and feedback includes its own suite selection.
 
 ## Controls
 

@@ -5,59 +5,56 @@ import type { CompanionPresetDefinitions, CompanionPresetSection } from '@compan
 export function UpdatePresets(self: ModuleInstance): void {
 	const structure: CompanionPresetSection[] = [
 		{
-			id: 'controls',
-			name: 'Grass Valley Controls',
+			id: 'connections',
+			name: 'Connections',
+			definitions: ['connection-suite1', 'connection-suite2', 'connection-suite3', 'connection-suite4'],
+		},
+		{
+			id: 'macros',
+			name: 'Macros',
 			definitions: [
-				{
-					id: 'all-buttons',
-					name: 'All controls',
-					description: 'All Stream Deck-inspired defaults in one group',
-					type: 'simple',
-					presets: [
-						'connection',
-						'aux1-source9',
-						'aux2-source17',
-						'aux3-source17',
-						'aux4-source17',
-						'macro1',
-						'macro2',
-						'macro3',
-						'macro4',
-						'macro5',
-						'macro6',
-						'macro7',
-						'macro8',
-						'macro-stop1',
-						'stopall',
-						'image-store1',
-						'image-input1',
-						'master-run',
-						'pgm-black',
-						'emem0',
-						'master-emem999',
-						'pgm-both-emem990',
-						'me3-emem999',
-						'pgm-pri-emem999',
-						'cut-pgm',
-						'auto-pgm',
-						'panel-memory1',
-						'gpi1',
-						'pbus-recall',
-						'pbus-trigger',
-						'button-map',
-						'raw-cpl',
-					],
-				},
+				'macro1',
+				'macro2',
+				'macro3',
+				'macro4',
+				'macro5',
+				'macro6',
+				'macro7',
+				'macro8',
+				'macro-stop1',
+				'stopall',
 			],
 		},
+		{
+			id: 'aux',
+			name: 'AUX Routing',
+			definitions: ['aux1-source9', 'aux2-source17', 'aux3-source17', 'aux4-source17'],
+		},
+		{
+			id: 'emem',
+			name: 'E-MEM and Timelines',
+			definitions: ['emem0', 'master-emem999', 'pgm-both-emem990', 'me3-emem999', 'pgm-pri-emem999', 'master-run'],
+		},
+		{ id: 'transitions', name: 'Crosspoints and Transitions', definitions: ['pgm-black', 'cut-pgm', 'auto-pgm'] },
+		{
+			id: 'panel-image',
+			name: 'Panel and Image Store',
+			definitions: ['panel-memory1', 'image-store1', 'image-input1'],
+		},
+		{
+			id: 'external',
+			name: 'PBUS, GPI, and Mapping',
+			definitions: ['gpi1', 'pbus-recall', 'pbus-trigger', 'button-map'],
+		},
+		{ id: 'advanced', name: 'Advanced', definitions: ['raw-cpl'] },
 	]
 	const presets: CompanionPresetDefinitions<ModuleSchema> = {
-		connection: {
+		'connection-suite1': {
 			type: 'simple',
-			name: 'Suite Connection (live state)',
-			style: { text: 'Not\nConnected', size: 10, color: 0xffffff, bgcolor: 0xa80000 },
-			steps: [{ down: [{ actionId: 'connection_toggle', options: {} }], up: [] }],
-			feedbacks: [{ feedbackId: 'connection_state', options: {} }],
+			name: 'Suite 1 Connect / Disconnect',
+			style: { text: 'Suite 1\nNot\nConnected', size: 10, color: 0xffffff, bgcolor: 0xa80000 },
+			steps: [{ down: [{ actionId: 'connection_toggle', options: { suite: 'suite1a' } }], up: [] }],
+			feedbacks: [{ feedbackId: 'connection_state', options: { suite: 'suite1a' } }],
 		},
 		macro1: {
 			type: 'simple',
@@ -180,6 +177,16 @@ export function UpdatePresets(self: ModuleInstance): void {
 			steps: [{ down: [{ actionId: 'raw_cpl', options: { command: '' } }], up: [] }],
 			feedbacks: [],
 		},
+	}
+	for (let suite = 2; suite <= 4; suite++) {
+		const id = `suite${suite}a`
+		presets[`connection-suite${suite}`] = {
+			type: 'simple',
+			name: `Suite ${suite} Connect / Disconnect`,
+			style: { text: `Suite ${suite}\nNot\nConnected`, size: 10, color: 0xffffff, bgcolor: 0xa80000 },
+			steps: [{ down: [{ actionId: 'connection_toggle', options: { suite: id } }], up: [] }],
+			feedbacks: [{ feedbackId: 'connection_state', options: { suite: id } }],
+		}
 	}
 	for (let macro = 2; macro <= 8; macro++) {
 		presets[`macro${macro}`] = {
