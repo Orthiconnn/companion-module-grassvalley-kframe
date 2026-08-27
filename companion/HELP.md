@@ -6,7 +6,7 @@ This development release ports the verified GV Macro Player Stream Deck v2026.3.
 
 ## Configuration
 
-Enter the K-Frame IP address and select the suite. Companion automatically uses 6132/6133 for Suite 1, 6134/6135 for Suite 2, 6136/6137 for Suite 3, or 6138/6139 for Suite 4. Enable the override only when custom local ports are required. Each simultaneously running module instance must use a unique pair of local ports.
+Enter the K-Frame IP address and select the suite. Ports are fixed in code and cannot be changed by the user: 6132/6133 for Suite 1, 6134/6135 for Suite 2, 6136/6137 for Suite 3, and 6138/6139 for Suite 4.
 
 ## Controls
 

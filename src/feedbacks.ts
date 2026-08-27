@@ -2,11 +2,41 @@ import type ModuleInstance from './main.js'
 
 export type FeedbacksSchema = {
 	connected: { type: 'boolean'; options: Record<string, never> }
+	connection_state: { type: 'advanced'; options: Record<string, never> }
 	macro_active: { type: 'boolean'; options: { macro: number } }
 }
 
 export function UpdateFeedbacks(self: ModuleInstance): void {
 	self.setFeedbackDefinitions({
+		connection_state: {
+			name: 'Connection state, ports, and heartbeat',
+			type: 'advanced',
+			options: [],
+			callback: () => {
+				const [mainPort, listenerPort] = self.suitePorts
+				const suite = Number(/^suite([1-4])a$/.exec(self.config.suite || 'suite1a')?.[1] ?? 1)
+				const heartbeat = self.heartbeatFlash ? '●' : '○'
+				if (self.connectionStatus === 'connected') {
+					return {
+						text: `SUITE ${suite} ${heartbeat}\n${mainPort}/${listenerPort}\nCONNECTED`,
+						bgcolor: 0x008000,
+						color: 0xffffff,
+					}
+				}
+				if (self.connectionStatus === 'connecting') {
+					return {
+						text: `SUITE ${suite} ○\n${mainPort}/${listenerPort}\nHANDSHAKE`,
+						bgcolor: 0xffc000,
+						color: 0x000000,
+					}
+				}
+				return {
+					text: `SUITE ${suite} ○\n${mainPort}/${listenerPort}\nDISCONNECTED`,
+					bgcolor: 0xb00000,
+					color: 0xffffff,
+				}
+			},
+		},
 		connected: {
 			name: 'Connection is online',
 			type: 'boolean',

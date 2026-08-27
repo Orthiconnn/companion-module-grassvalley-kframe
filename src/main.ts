@@ -24,6 +24,8 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	connectionStatus = 'disconnected'
 	frameVersion = ''
 	protocolName = ''
+	heartbeatFlash = false
+	private heartbeatFlashTimer: NodeJS.Timeout | undefined
 
 	constructor(internal: unknown) {
 		super(internal)
@@ -43,6 +45,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	}
 	// When module gets deleted
 	async destroy(): Promise<void> {
+		if (this.heartbeatFlashTimer) clearTimeout(this.heartbeatFlashTimer)
 		protocol.clientEmitter.off('status', this.handleProtocolStatus)
 		await protocol.disconnectConnection(CONNECTION_ID)
 	}
@@ -66,6 +69,14 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			protocol.subscribeToSourceNames(CONNECTION_ID)
 			setTimeout(() => protocol.subscribeToAuxBus(CONNECTION_ID), 200)
 			setTimeout(() => protocol.subscribeToMEBus(CONNECTION_ID), 400)
+		} else if (type === 'HEARTBEAT_ACK') {
+			this.heartbeatFlash = true
+			this.checkFeedbacks('connection_state')
+			if (this.heartbeatFlashTimer) clearTimeout(this.heartbeatFlashTimer)
+			this.heartbeatFlashTimer = setTimeout(() => {
+				this.heartbeatFlash = false
+				this.checkFeedbacks('connection_state')
+			}, 300)
 		} else if (type === 'FRAME_VERSION' && message && typeof message === 'object' && 'version' in message) {
 			this.frameVersion = String(message.version)
 		} else if (['ERROR', 'DISCONNECTED', 'HANDSHAKE_TIMEOUT_ERROR', 'HEARTBEAT_TIMEOUT'].includes(type)) {
@@ -89,16 +100,12 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.updateRuntimeState()
 		try {
 			const suite = this.config.suite || 'suite1a'
-			const suiteNumber = Number(/^suite([1-4])a$/.exec(suite)?.[1] ?? 1)
-			const defaultMainPort = 6130 + suiteNumber * 2
+			const [mainPort, listenerPort] = this.suitePorts
 			await protocol.createConnection(
 				CONNECTION_ID,
 				this.config.host,
 				suite,
-				{
-					mainPort: this.config.customPorts ? this.config.mainPort || defaultMainPort : defaultMainPort,
-					listenerPort: this.config.customPorts ? this.config.listenerPort || defaultMainPort + 1 : defaultMainPort + 1,
-				},
+				{ mainPort, listenerPort },
 				suite.replace('suite', 'Suite ').replace('a', ''),
 				'2026.0.9.1',
 				'Aug 27 2026',
@@ -130,7 +137,13 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			protocol: this.protocolName,
 			frame_version: this.frameVersion,
 		})
-		this.checkFeedbacks('connected', 'macro_active')
+		this.checkFeedbacks('connected', 'connection_state', 'macro_active')
+	}
+
+	get suitePorts(): [number, number] {
+		const suiteNumber = Number(/^suite([1-4])a$/.exec(this.config.suite || 'suite1a')?.[1] ?? 1)
+		const mainPort = 6130 + suiteNumber * 2
+		return [mainPort, mainPort + 1]
 	}
 
 	get protocol(): ProtocolManagerFacade {

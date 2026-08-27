@@ -7,6 +7,7 @@ type EmptyOptions = { options: Record<string, never> }
 export type ActionsSchema = {
 	connect: EmptyOptions
 	disconnect: EmptyOptions
+	connection_toggle: EmptyOptions
 	macro_play: NumberOption
 	macro_stop: NumberOption
 	macro_stop_all: EmptyOptions
@@ -53,6 +54,14 @@ export function UpdateActions(self: ModuleInstance): void {
 	self.setActionDefinitions({
 		connect: { name: 'Connection: Connect', options: [], callback: async () => self.connectFrame() },
 		disconnect: { name: 'Connection: Disconnect', options: [], callback: async () => self.disconnectFrame() },
+		connection_toggle: {
+			name: 'Connection: Connect / Disconnect',
+			options: [],
+			callback: async () =>
+				self.connectionStatus === 'connected' || self.connectionStatus === 'connecting'
+					? self.disconnectFrame()
+					: self.connectFrame(),
+		},
 		macro_play: {
 			name: 'Macro: Play / Continue',
 			options: [{ id: 'value', type: 'number', label: 'Macro', default: 1, min: 1, max: 999 }],
