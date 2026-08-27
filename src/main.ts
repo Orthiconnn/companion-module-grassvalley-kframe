@@ -44,6 +44,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		SUITES.map((id) => [id, { status: 'disconnected', frameVersion: '', protocolName: '', heartbeatFlash: false }]),
 	) as Record<SuiteId, SuiteState>
 	readonly macroButtons = new Map<string, { suite: SuiteId; macro: number }>()
+	readonly suiteButtons = new Map<string, Map<string, SuiteId>>()
 
 	constructor(internal: unknown) {
 		super(internal)
@@ -148,13 +149,30 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	}
 
 	trackMacroButton(controlId: string, suite: unknown, macro: unknown): void {
-		this.macroButtons.set(controlId, { suite: suiteId(suite), macro: Number(macro) || 1 })
+		const targetSuite = suiteId(suite)
+		this.macroButtons.set(controlId, { suite: targetSuite, macro: Number(macro) || 1 })
 		this.checkFeedbacks('macro_button_state')
 	}
 
 	untrackMacroButton(controlId: string): void {
 		this.macroButtons.delete(controlId)
 		this.checkFeedbacks('macro_button_state')
+	}
+
+	trackSuiteButton(controlId: string, actionId: string, suite: unknown): void {
+		const actions = this.suiteButtons.get(controlId) ?? new Map<string, SuiteId>()
+		actions.set(actionId, suiteId(suite))
+		this.suiteButtons.set(controlId, actions)
+		this.checkFeedbacks('suite_badge')
+	}
+
+	untrackSuiteButton(controlId: string, actionId: string): void {
+		const actions = this.suiteButtons.get(controlId)
+		if (actions) {
+			actions.delete(actionId)
+			if (actions.size === 0) this.suiteButtons.delete(controlId)
+		}
+		this.checkFeedbacks('suite_badge')
 	}
 
 	private updateRuntimeState(): void {

@@ -36,6 +36,7 @@ const crosspointChoices = Object.keys(meIndexes).flatMap((me) => [
 const transitionChoices = Object.keys(meIndexes).flatMap((me) => [
 	{ id: `${me}_PRI`, label: `${me} Primary` },
 	{ id: `${me}_SEC`, label: `${me} Secondary` },
+	{ id: `${me}_BOTH`, label: `${me} Both` },
 	...Array.from({ length: 6 }, (_, index) => ({ id: `${me}_KEY${index + 1}`, label: `${me} Key ${index + 1}` })),
 ])
 const ememChoices = [
@@ -66,6 +67,16 @@ export function UpdateActions(self: ModuleInstance): void {
 		],
 	}
 	const id = (e: { options: { suite?: string } }) => self.connectionId(suiteId(e.options.suite))
+	const suiteSubscription: {
+		optionsToMonitorForSubscribe: 'suite'[]
+		subscribe: (action: { id: string; controlId: string; options: SuiteOption }) => void
+		unsubscribe: (action: { id: string; controlId: string }) => void
+	} = {
+		optionsToMonitorForSubscribe: ['suite'],
+		subscribe: (action: { id: string; controlId: string; options: SuiteOption }) =>
+			self.trackSuiteButton(action.controlId, action.id, action.options.suite),
+		unsubscribe: (action: { id: string; controlId: string }) => self.untrackSuiteButton(action.controlId, action.id),
+	}
 	self.setActionDefinitions({
 		connect: {
 			name: 'Connection: Connect',
@@ -98,16 +109,19 @@ export function UpdateActions(self: ModuleInstance): void {
 		},
 		macro_stop: {
 			name: 'Macro: Stop',
+			...suiteSubscription,
 			options: [suiteOption, { id: 'value', type: 'number', label: 'Macro', default: 1, min: 1, max: 999 }],
 			callback: (e) => resultOrThrow(p.sendMacroStop(id(e), Number(e.options.value))),
 		},
 		macro_stop_all: {
 			name: 'Macro: Stop All',
+			...suiteSubscription,
 			options: [suiteOption],
 			callback: (e) => resultOrThrow(p.sendMacroStopAll(id(e))),
 		},
 		aux_route: {
 			name: 'AUX: Route Source',
+			...suiteSubscription,
 			options: [
 				suiteOption,
 				{ id: 'aux', type: 'number', label: 'AUX', default: 1, min: 1, max: 96 },
@@ -131,6 +145,7 @@ export function UpdateActions(self: ModuleInstance): void {
 		},
 		crosspoint: {
 			name: 'Crosspoint: Route Source',
+			...suiteSubscription,
 			options: [
 				suiteOption,
 				{ id: 'target', type: 'dropdown', label: 'Bus / Keyer', default: 'PGM_A', choices: crosspointChoices },
@@ -155,6 +170,7 @@ export function UpdateActions(self: ModuleInstance): void {
 		},
 		emem: {
 			name: 'E-MEM: Recall',
+			...suiteSubscription,
 			options: [
 				suiteOption,
 				{ id: 'target', type: 'dropdown', label: 'Target', default: 'MASTER', choices: ememChoices },
@@ -173,6 +189,7 @@ export function UpdateActions(self: ModuleInstance): void {
 		},
 		transition: {
 			name: 'Transition: Cut / Auto',
+			...suiteSubscription,
 			options: [
 				suiteOption,
 				{ id: 'target', type: 'dropdown', label: 'Target', default: 'PGM_PRI', choices: transitionChoices },
@@ -191,20 +208,28 @@ export function UpdateActions(self: ModuleInstance): void {
 				const [me, bus] = String(e.options.target).split('_')
 				const index = meIndexes[me]
 				if (index === undefined || !bus) throw new Error('Invalid transition target')
+				const eventId = String(e.options.transition) === 'cut' ? 0x44 : 0x43
+				if (bus === 'BOTH') {
+					resultOrThrow(p.sendTransitionEvent(id(e), eventId, 0x03000000 + index))
+					resultOrThrow(p.sendTransitionEvent(id(e), eventId, 0x03000010 + index))
+					return
+				}
 				const key = /^KEY([1-6])$/.exec(bus)
 				const did = key
 					? 0x08000000 + (Number(key[1]) - 1) * 0x10 + index
 					: 0x03000000 + (bus === 'SEC' ? 0x10 : 0) + index
-				resultOrThrow(p.sendTransitionEvent(id(e), String(e.options.transition) === 'cut' ? 0x44 : 0x43, did))
+				resultOrThrow(p.sendTransitionEvent(id(e), eventId, did))
 			},
 		},
 		panel_memory: {
 			name: 'Panel Memory: Recall',
+			...suiteSubscription,
 			options: [suiteOption, { id: 'value', type: 'number', label: 'Register', default: 1, min: 1, max: 99 }],
 			callback: (e) => resultOrThrow(p.sendPanelMem(id(e), Number(e.options.value))),
 		},
 		image_store: {
 			name: 'Image Store: Select Image',
+			...suiteSubscription,
 			options: [
 				suiteOption,
 				{ id: 'output', type: 'number', label: 'Output', default: 1, min: 1, max: 10 },
@@ -214,16 +239,19 @@ export function UpdateActions(self: ModuleInstance): void {
 		},
 		image_store_input: {
 			name: 'Image Store: Select Input',
+			...suiteSubscription,
 			options: [suiteOption, { id: 'value', type: 'number', label: 'Input', default: 1, min: 1, max: 850 }],
 			callback: (e) => resultOrThrow(p.sendImageStoreInput(id(e), Number(e.options.value))),
 		},
 		raw_cpl: {
 			name: 'Advanced: Send Raw CPL',
+			...suiteSubscription,
 			options: [suiteOption, { id: 'command', type: 'textinput', label: 'Hex command', default: '' }],
 			callback: (e) => resultOrThrow(p.sendRawCommand(id(e), String(e.options.command))),
 		},
 		run: {
 			name: 'Timeline: RUN',
+			...suiteSubscription,
 			options: [
 				suiteOption,
 				{ id: 'target', type: 'dropdown', label: 'Target', default: 'MASTER', choices: runChoices },
@@ -232,11 +260,13 @@ export function UpdateActions(self: ModuleInstance): void {
 		},
 		gpi: {
 			name: 'GPI: Fire',
+			...suiteSubscription,
 			options: [suiteOption, { id: 'value', type: 'number', label: 'GPI', default: 1, min: 1, max: 40 }],
 			callback: (e) => resultOrThrow(p.sendRawCommand(id(e), buildGpi(Number(e.options.value)))),
 		},
 		pbus_recall: {
 			name: 'PBUS: Recall Register',
+			...suiteSubscription,
 			options: [
 				suiteOption,
 				{ id: 'pbus', type: 'number', label: 'PBUS', default: 1, min: 1, max: 24 },
@@ -251,6 +281,7 @@ export function UpdateActions(self: ModuleInstance): void {
 		},
 		pbus_trigger: {
 			name: 'PBUS: Fire Trigger',
+			...suiteSubscription,
 			options: [
 				suiteOption,
 				{ id: 'pbus', type: 'number', label: 'PBUS', default: 1, min: 1, max: 24 },
@@ -266,6 +297,7 @@ export function UpdateActions(self: ModuleInstance): void {
 		},
 		button_mapping: {
 			name: 'Panel: Map Button to Source',
+			...suiteSubscription,
 			options: [
 				suiteOption,
 				{

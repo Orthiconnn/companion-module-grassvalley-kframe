@@ -7,8 +7,10 @@ const SUITE_NUMBER_PATHS: Record<number, string> = {
 
 const badgeSvg = (suite: number): string => `
 <svg xmlns="http://www.w3.org/2000/svg" width="360" height="360" viewBox="0 0 360 360">
-	<circle cx="38" cy="322" r="31" fill="#050505" stroke="#00cfd5" stroke-width="6"/>
-	<path d="${SUITE_NUMBER_PATHS[suite]}" fill="none" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+	<g transform="translate(24 -24)">
+		<circle cx="38" cy="322" r="31" fill="#050505" stroke="#00cfd5" stroke-width="6"/>
+		<path d="${SUITE_NUMBER_PATHS[suite]}" fill="none" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+	</g>
 </svg>`
 
 /**
@@ -19,3 +21,7 @@ const badgeSvg = (suite: number): string => `
 export const SUITE_BADGES: Record<number, string> = Object.fromEntries(
 	[1, 2, 3, 4].map((suite) => [suite, Buffer.from(badgeSvg(suite)).toString('base64')]),
 )
+
+/** A valid transparent PNG used to explicitly clear a preset's fallback badge. */
+export const CLEAR_BADGE =
+	'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGBgAAAABQABpfZFQAAAAABJRU5ErkJggg=='

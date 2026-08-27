@@ -1,6 +1,6 @@
 import type ModuleInstance from './main.js'
 import { suiteId, suiteNumber, suitePorts } from './main.js'
-import { SUITE_BADGES } from './badges.js'
+import { CLEAR_BADGE, SUITE_BADGES } from './badges.js'
 
 type SuiteOptions = { suite?: string }
 export type FeedbacksSchema = {
@@ -8,6 +8,7 @@ export type FeedbacksSchema = {
 	connection_state: { type: 'advanced'; options: SuiteOptions }
 	macro_active: { type: 'boolean'; options: SuiteOptions & { macro: number } }
 	macro_button_state: { type: 'advanced'; options: { automaticLabel: boolean } }
+	suite_badge: { type: 'advanced'; options: Record<string, never> }
 }
 
 const suiteOption = {
@@ -38,22 +39,29 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					const info = self.protocol.getConnectionInfo(self.connectionId(id))
 					const protocolName = (state.protocolName || info?.protocol || 'UDP').toUpperCase()
 					const livePort = info?.ports.dynamic || (protocolName === 'TCP' ? 5000 : mainPort)
-					const version = state.frameVersion ? `\n${state.frameVersion}` : ''
 					return {
-						text: `Suite ${suiteNumber(id)}\nConnected\n${protocolName}:${livePort}${version}\n${heartbeat}`,
+						text: `\nSuite ${suiteNumber(id)}\nConnected\n${protocolName}:${livePort}\n${state.frameVersion || ' '}\n${heartbeat}`,
 						bgcolor: 0x287a0b,
 						color: 0xffffff,
 						size: 10,
+						alignment: 'center:center',
 					}
 				}
 				if (state.status === 'connecting')
 					return {
-						text: `Suite ${suiteNumber(id)}\nConnecting\nEstablishing\nHeartbeat\n○`,
+						text: `\nSuite ${suiteNumber(id)}\nConnecting\nEstablishing\nHeartbeat\n○`,
 						bgcolor: 0xb88600,
 						color: 0xffffff,
 						size: 10,
+						alignment: 'center:center',
 					}
-				return { text: `Suite ${suiteNumber(id)}\nNot\nConnected\n \n○`, bgcolor: 0xa80000, color: 0xffffff, size: 10 }
+				return {
+					text: `\nSuite ${suiteNumber(id)}\nNot\nConnected\n \n○`,
+					bgcolor: 0xa80000,
+					color: 0xffffff,
+					size: 10,
+					alignment: 'center:center',
+				}
 			},
 		},
 		connected: {
@@ -99,6 +107,17 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					color: status !== null && status !== 0 ? 0x000000 : 0xffffff,
 					size: 10,
 				}
+			},
+		},
+		suite_badge: {
+			name: 'Show suite badge for this button action',
+			type: 'advanced',
+			options: [],
+			callback: (feedback) => {
+				const suites = new Set(self.suiteButtons.get(feedback.controlId)?.values() ?? [])
+				if (suites.size !== 1) return { png64: CLEAR_BADGE }
+				const [suite] = suites
+				return { png64: SUITE_BADGES[suiteNumber(suite)], pngalignment: 'left:bottom' }
 			},
 		},
 	})

@@ -18,6 +18,8 @@ Connection and macro-active feedbacks, connection variables, and Stream Deck-ins
 
 Macro presets show the selected suite as a circled number in the lower-left. Their automatic-label feedback follows the Macro and Suite fields on the button's Macro action, so changing the Macro field also changes the displayed `Macro N` label. Disable **Automatically show Macro number** on that feedback when using custom button text.
 
+All suite-targeted action presets use the same padded lower-left suite badge, which follows the Suite field on the button action. AUX defaults provide AUX 1–4 on Source 1. Crosspoint defaults provide A and B sides for M/E 1–4 and Program on Source 1, using brighter A-side and darker B-side family colors. Transition defaults use the matching M/E color families and provide M/E 1–4 Program CUT and AUTO targeting both primary and secondary. PBUS Recall defaults cover PBUS 1–8 at Register 0, and GPI defaults cover GPI 1–10. Button Mapping defaults cover Buttons 1–3 on Shifts 1–4 for M/E 1–4 and Program, all mapped to Source 1. Panel Memory defaults cover Registers 1–8.
+
 ## Safety
 
 Button Mapping changes the switcher panel mapping. PBUS Trigger sends a clear/select/fire/clear sequence. Confirm targets on a simulator or non-air system before using either action in production.
