@@ -25,7 +25,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 						text: `Suite ${suite}\nConnected\n${protocol}:${livePort}${version}\n${heartbeat}`,
 						bgcolor: 0x287a0b,
 						color: 0xffffff,
-						size: 14,
+						size: 10,
 					}
 				}
 				if (self.connectionStatus === 'connecting') {
@@ -33,14 +33,14 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 						text: `Suite ${suite}\nConnecting\nEstablishing\nHeartbeat\n○`,
 						bgcolor: 0xb88600,
 						color: 0xffffff,
-						size: 14,
+						size: 10,
 					}
 				}
 				return {
 					text: `Suite ${suite}\nNot\nConnected\n \n○`,
 					bgcolor: 0xa80000,
 					color: 0xffffff,
-					size: 14,
+					size: 10,
 				}
 			},
 		},
