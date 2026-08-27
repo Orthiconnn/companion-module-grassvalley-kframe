@@ -13,27 +13,34 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 			type: 'advanced',
 			options: [],
 			callback: () => {
-				const [mainPort, listenerPort] = self.suitePorts
+				const [mainPort] = self.suitePorts
 				const suite = Number(/^suite([1-4])a$/.exec(self.config.suite || 'suite1a')?.[1] ?? 1)
 				const heartbeat = self.heartbeatFlash ? '●' : '○'
 				if (self.connectionStatus === 'connected') {
+					const info = self.protocol.raw.getConnectionInfo(self.protocol.id)
+					const protocol = (self.protocolName || info?.protocol || 'UDP').toUpperCase()
+					const livePort = info?.ports.dynamic || (protocol === 'TCP' ? 5000 : mainPort)
+					const version = self.frameVersion ? `\n${self.frameVersion}` : ''
 					return {
-						text: `SUITE ${suite} ${heartbeat}\n${mainPort}/${listenerPort}\nCONNECTED`,
-						bgcolor: 0x008000,
+						text: `Suite ${suite}\nConnected\n${protocol}:${livePort}${version}\n${heartbeat}`,
+						bgcolor: 0x287a0b,
 						color: 0xffffff,
+						size: 14,
 					}
 				}
 				if (self.connectionStatus === 'connecting') {
 					return {
-						text: `SUITE ${suite} ○\n${mainPort}/${listenerPort}\nHANDSHAKE`,
-						bgcolor: 0xffc000,
-						color: 0x000000,
+						text: `Suite ${suite}\nConnecting\nEstablishing\nHeartbeat\n○`,
+						bgcolor: 0xb88600,
+						color: 0xffffff,
+						size: 14,
 					}
 				}
 				return {
-					text: `SUITE ${suite} ○\n${mainPort}/${listenerPort}\nDISCONNECTED`,
-					bgcolor: 0xb00000,
+					text: `Suite ${suite}\nNot\nConnected\n \n○`,
+					bgcolor: 0xa80000,
 					color: 0xffffff,
+					size: 14,
 				}
 			},
 		},
