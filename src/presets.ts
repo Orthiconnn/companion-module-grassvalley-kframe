@@ -62,7 +62,17 @@ export function UpdatePresets(self: ModuleInstance): void {
 		{
 			id: 'emem',
 			name: 'E-MEMs',
-			definitions: ['emem0', 'master-emem999', 'pgm-both-emem990', 'me3-emem999', 'pgm-pri-emem999', 'master-run'],
+			definitions: [
+				'emem-master-0',
+				'emem-me1-primary-0',
+				'emem-me1-secondary-0',
+				'emem-me2-primary-0',
+				'emem-me2-secondary-0',
+				'emem-me3-primary-0',
+				'emem-me3-secondary-0',
+				'emem-me4-primary-0',
+				'emem-me4-secondary-0',
+			],
 		},
 		{
 			id: 'transitions',
@@ -76,6 +86,8 @@ export function UpdatePresets(self: ModuleInstance): void {
 				'transition-me3-auto',
 				'transition-me4-cut',
 				'transition-me4-auto',
+				'transition-pgm-cut',
+				'transition-pgm-auto',
 			],
 		},
 		{
@@ -106,7 +118,19 @@ export function UpdatePresets(self: ModuleInstance): void {
 		{
 			id: 'image-store',
 			name: 'Image Store',
-			definitions: ['image-store1', 'image-input1'],
+			definitions: [
+				'image-store-output1-image1',
+				'image-store-output2-image1',
+				'image-store-output3-image1',
+				'image-store-output4-image1',
+				'image-store-output5-image1',
+				'image-store-output6-image1',
+				'image-store-output7-image1',
+				'image-store-output8-image1',
+				'image-store-output9-image1',
+				'image-store-output10-image1',
+				'image-input1',
+			],
 		},
 		{
 			id: 'button-mapping',
@@ -169,10 +193,10 @@ export function UpdatePresets(self: ModuleInstance): void {
 			steps: [{ down: [{ actionId: 'macro_stop_all', options: { suite: 'suite1a' } }], up: [] }],
 			feedbacks: [suiteBadgeFeedback()],
 		},
-		emem0: {
+		'emem-master-0': {
 			type: 'simple',
 			name: 'Master E-MEM 0',
-			style: { text: 'MASTER\nE-MEM 0', size: 10, color: 0xffffff, bgcolor: 0xd65f00, ...suiteBadgeStyle },
+			style: { text: 'MASTER\nE-MEM 0', size: 10, color: 0x000000, bgcolor: 0xffffff, ...suiteBadgeStyle },
 			steps: [{ down: [{ actionId: 'emem', options: { suite: 'suite1a', target: 'MASTER', register: 0 } }], up: [] }],
 			feedbacks: [suiteBadgeFeedback()],
 		},
@@ -195,10 +219,10 @@ export function UpdatePresets(self: ModuleInstance): void {
 			steps: [{ down: [{ actionId: 'panel_memory', options: { suite: 'suite1a', value: 1 } }], up: [] }],
 			feedbacks: [suiteBadgeFeedback()],
 		},
-		'image-store1': {
+		'image-store-output1-image1': {
 			type: 'simple',
-			name: 'Image Store 1',
-			style: { text: 'IMAGE\nSTORE 1', size: 10, color: 0xffffff, bgcolor: 0x6a4c93, ...suiteBadgeStyle },
+			name: 'Image Store Output 1 Image 0001',
+			style: { text: 'OUT 1\nIMAGE 0001', size: 10, color: 0xffffff, bgcolor: 0x6a4c93, ...suiteBadgeStyle },
 			steps: [{ down: [{ actionId: 'image_store', options: { suite: 'suite1a', output: 1, image: 1 } }], up: [] }],
 			feedbacks: [suiteBadgeFeedback()],
 		},
@@ -207,13 +231,6 @@ export function UpdatePresets(self: ModuleInstance): void {
 			name: 'Image Store Input 1',
 			style: { text: 'IMAGE IN\n1', size: 10, color: 0xffffff, bgcolor: 0x6a4c93, ...suiteBadgeStyle },
 			steps: [{ down: [{ actionId: 'image_store_input', options: { suite: 'suite1a', value: 1 } }], up: [] }],
-			feedbacks: [suiteBadgeFeedback()],
-		},
-		'master-run': {
-			type: 'simple',
-			name: 'Master Timeline RUN',
-			style: { text: 'MASTER\nRUN', size: 10, color: 0x000000, bgcolor: 0xffd000, ...suiteBadgeStyle },
-			steps: [{ down: [{ actionId: 'run', options: { suite: 'suite1a', target: 'MASTER' } }], up: [] }],
 			feedbacks: [suiteBadgeFeedback()],
 		},
 		gpi1: {
@@ -308,14 +325,13 @@ export function UpdatePresets(self: ModuleInstance): void {
 			}
 		}
 	}
-	for (const me of [1, 2, 3, 4] as const) {
-		const family = busFamilies[me - 1]
+	for (const family of busFamilies) {
 		for (const transition of ['cut', 'auto'] as const) {
-			presets[`transition-me${me}-${transition}`] = {
+			presets[`transition-${family.id}-${transition}`] = {
 				type: 'simple',
-				name: `M/E ${me} Program ${transition.toUpperCase()}`,
+				name: `${family.label} Program ${transition.toUpperCase()}`,
 				style: {
-					text: `ME${me} PGM\n${transition.toUpperCase()}`,
+					text: `${family.label} PGM\n${transition.toUpperCase()}`,
 					size: 10,
 					color: family.text,
 					bgcolor: transition === 'auto' ? family.bright : family.dark,
@@ -326,7 +342,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 						down: [
 							{
 								actionId: 'transition',
-								options: { suite: 'suite1a', target: `ME${me}_BOTH`, transition },
+								options: { suite: 'suite1a', target: `${family.target}_BOTH`, transition },
 							},
 						],
 						up: [],
@@ -342,6 +358,21 @@ export function UpdatePresets(self: ModuleInstance): void {
 			name: `PBUS ${pbus} Recall 0`,
 			style: { text: `PBUS ${pbus}\nRECALL 0`, size: 10, color: 0x000000, bgcolor: 0xffbf00, ...suiteBadgeStyle },
 			steps: [{ down: [{ actionId: 'pbus_recall', options: { suite: 'suite1a', pbus, register: 0 } }], up: [] }],
+			feedbacks: [suiteBadgeFeedback()],
+		}
+	}
+	for (let output = 2; output <= 10; output++) {
+		presets[`image-store-output${output}-image1`] = {
+			type: 'simple',
+			name: `Image Store Output ${output} Image 0001`,
+			style: {
+				text: `OUT ${output}\nIMAGE 0001`,
+				size: 10,
+				color: 0xffffff,
+				bgcolor: 0x6a4c93,
+				...suiteBadgeStyle,
+			},
+			steps: [{ down: [{ actionId: 'image_store', options: { suite: 'suite1a', output, image: 1 } }], up: [] }],
 			feedbacks: [suiteBadgeFeedback()],
 		}
 	}
@@ -404,31 +435,46 @@ export function UpdatePresets(self: ModuleInstance): void {
 			}
 		}
 	}
-	for (const [id, name, target, register] of [
-		['master-emem999', 'Master E-MEM 999', 'MASTER', 999],
-		['pgm-both-emem990', 'PGM Both E-MEM 990', 'PGM-BOTH', 990],
-		['me3-emem999', 'ME3 Primary E-MEM 999', 'ME3-PRI', 999],
-		['pgm-pri-emem999', 'PGM Primary E-MEM 999', 'PGM-PRI', 999],
-	] as const) {
-		presets[id] = {
-			type: 'simple',
-			name,
-			style: {
-				text: name.replace(' E-MEM ', '\nEMEM\n'),
-				size: 10,
-				color: 0xffffff,
-				bgcolor: 0xb72c00,
-				...suiteBadgeStyle,
-			},
-			steps: [{ down: [{ actionId: 'emem', options: { suite: 'suite1a', target, register } }], up: [] }],
-			feedbacks: [suiteBadgeFeedback()],
+	for (const family of busFamilies.slice(0, 4)) {
+		for (const [modeId, modeLabel, modeTarget] of [
+			['primary', 'PRI', 'PRI'],
+			['secondary', 'SEC', 'SEC'],
+		] as const) {
+			presets[`emem-${family.id}-${modeId}-0`] = {
+				type: 'simple',
+				name: `${family.label} ${modeId === 'primary' ? 'Primary' : 'Secondary'} E-MEM 0`,
+				style: {
+					text: `${family.label} ${modeLabel}\nE-MEM 0`,
+					size: 10,
+					color: family.text,
+					bgcolor: modeId === 'primary' ? family.bright : family.dark,
+					...suiteBadgeStyle,
+				},
+				steps: [
+					{
+						down: [
+							{
+								actionId: 'emem',
+								options: { suite: 'suite1a', target: `${family.target}-${modeTarget}`, register: 0 },
+							},
+						],
+						up: [],
+					},
+				],
+				feedbacks: [suiteBadgeFeedback()],
+			}
 		}
 	}
+	const referencedPresets = new Set<string>()
 	for (const section of structure) {
 		for (const presetId of section.definitions) {
 			if (typeof presetId !== 'string') continue
 			if (!presets[presetId]) throw new Error(`Preset section ${section.id} references missing preset ${presetId}`)
+			referencedPresets.add(presetId)
 		}
+	}
+	for (const presetId of Object.keys(presets)) {
+		if (!referencedPresets.has(presetId)) throw new Error(`Preset ${presetId} is not reachable from a preset section`)
 	}
 	self.setPresetDefinitions(structure, presets)
 }
