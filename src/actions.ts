@@ -91,6 +91,9 @@ export function UpdateActions(self: ModuleInstance): void {
 		macro_play: {
 			name: 'Macro: Play / Continue',
 			options: [suiteOption, { id: 'value', type: 'number', label: 'Macro', default: 1, min: 1, max: 999 }],
+			optionsToMonitorForSubscribe: ['suite', 'value'],
+			subscribe: (action) => self.trackMacroButton(action.controlId, action.options.suite, action.options.value),
+			unsubscribe: (action) => self.untrackMacroButton(action.controlId),
 			callback: (e) => resultOrThrow(p.sendMacro(id(e), Number(e.options.value))),
 		},
 		macro_stop: {

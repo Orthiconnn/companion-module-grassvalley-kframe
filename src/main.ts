@@ -43,6 +43,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	readonly suiteStates = Object.fromEntries(
 		SUITES.map((id) => [id, { status: 'disconnected', frameVersion: '', protocolName: '', heartbeatFlash: false }]),
 	) as Record<SuiteId, SuiteState>
+	readonly macroButtons = new Map<string, { suite: SuiteId; macro: number }>()
 
 	constructor(internal: unknown) {
 		super(internal)
@@ -146,6 +147,16 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		if (!result.success) this.log('warn', result.message)
 	}
 
+	trackMacroButton(controlId: string, suite: unknown, macro: unknown): void {
+		this.macroButtons.set(controlId, { suite: suiteId(suite), macro: Number(macro) || 1 })
+		this.checkFeedbacks('macro_button_state')
+	}
+
+	untrackMacroButton(controlId: string): void {
+		this.macroButtons.delete(controlId)
+		this.checkFeedbacks('macro_button_state')
+	}
+
 	private updateRuntimeState(): void {
 		const statuses = Object.values(this.suiteStates).map((state) => state.status)
 		this.updateStatus(
@@ -168,7 +179,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 				}),
 			),
 		)
-		this.checkFeedbacks('connected', 'connection_state', 'macro_active')
+		this.checkFeedbacks('connected', 'connection_state', 'macro_active', 'macro_button_state')
 	}
 
 	get protocol(): typeof protocol {

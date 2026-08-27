@@ -16,6 +16,8 @@ The first iteration includes native actions for connection, macros, AUX routing,
 
 Connection and macro-active feedbacks, connection variables, and Stream Deck-inspired defaults are included for Macro 1–8, AUX 1–4, E-MEM, Image Store, RUN, recall, trigger, and GPI workflows. This build has passed local byte-vector, TypeScript, lint, package, and Companion loading checks; live switcher or simulator behavior must still be validated before production use.
 
+Macro presets show the selected suite as a circled number in the lower-left. Their automatic-label feedback follows the Macro and Suite fields on the button's Macro action, so changing the Macro field also changes the displayed `Macro N` label. Disable **Automatically show Macro number** on that feedback when using custom button text.
+
 ## Safety
 
 Button Mapping changes the switcher panel mapping. PBUS Trigger sends a clear/select/fire/clear sequence. Confirm targets on a simulator or non-air system before using either action in production.

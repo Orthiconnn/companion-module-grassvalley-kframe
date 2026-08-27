@@ -1,11 +1,13 @@
 import type ModuleInstance from './main.js'
 import { suiteId, suiteNumber, suitePorts } from './main.js'
+import { SUITE_BADGES } from './badges.js'
 
 type SuiteOptions = { suite?: string }
 export type FeedbacksSchema = {
 	connected: { type: 'boolean'; options: SuiteOptions }
 	connection_state: { type: 'advanced'; options: SuiteOptions }
 	macro_active: { type: 'boolean'; options: SuiteOptions & { macro: number } }
+	macro_button_state: { type: 'advanced'; options: { automaticLabel: boolean } }
 }
 
 const suiteOption = {
@@ -72,6 +74,31 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					Number(feedback.options.macro),
 				)
 				return status !== null && status !== 0
+			},
+		},
+		macro_button_state: {
+			name: 'Macro button label, suite badge, and active state',
+			type: 'advanced',
+			options: [
+				{
+					id: 'automaticLabel',
+					type: 'checkbox',
+					label: 'Automatically show Macro number',
+					default: true,
+				},
+			],
+			callback: (feedback) => {
+				const assignment = self.macroButtons.get(feedback.controlId)
+				if (!assignment) return {}
+				const status = self.protocol.getMacroStatus(self.connectionId(assignment.suite), assignment.macro)
+				return {
+					...(feedback.options.automaticLabel ? { text: `Macro\n${assignment.macro}` } : {}),
+					png64: SUITE_BADGES[suiteNumber(assignment.suite)],
+					pngalignment: 'left:bottom',
+					bgcolor: status !== null && status !== 0 ? 0xffa500 : 0x285b0b,
+					color: status !== null && status !== 0 ? 0x000000 : 0xffffff,
+					size: 10,
+				}
 			},
 		},
 	})

@@ -1,6 +1,7 @@
 import type { ModuleSchema } from './main.js'
 import type ModuleInstance from './main.js'
 import type { CompanionPresetDefinitions, CompanionPresetSection } from '@companion-module/base'
+import { SUITE_BADGES } from './badges.js'
 
 export function UpdatePresets(self: ModuleInstance): void {
 	const structure: CompanionPresetSection[] = [
@@ -59,9 +60,21 @@ export function UpdatePresets(self: ModuleInstance): void {
 		macro1: {
 			type: 'simple',
 			name: 'Macro 1',
-			style: { text: 'Macro\n1', size: 10, color: 0xffffff, bgcolor: 0x285b0b },
-			steps: [{ down: [{ actionId: 'macro_play', options: { value: 1 } }], up: [] }],
-			feedbacks: [{ feedbackId: 'macro_active', options: { macro: 1 }, style: { bgcolor: 0xffa500, color: 0x000000 } }],
+			style: {
+				text: 'Macro\n1',
+				size: 10,
+				color: 0xffffff,
+				bgcolor: 0x285b0b,
+				png64: SUITE_BADGES[1],
+				pngalignment: 'left:bottom',
+			},
+			steps: [{ down: [{ actionId: 'macro_play', options: { suite: 'suite1a', value: 1 } }], up: [] }],
+			feedbacks: [
+				{
+					feedbackId: 'macro_button_state',
+					options: { automaticLabel: true },
+				},
+			],
 		},
 		'macro-stop1': {
 			type: 'simple',
@@ -192,9 +205,21 @@ export function UpdatePresets(self: ModuleInstance): void {
 		presets[`macro${macro}`] = {
 			type: 'simple',
 			name: `Macro ${macro}`,
-			style: { text: `Macro\n${macro}`, size: 10, color: 0xffffff, bgcolor: 0x285b0b },
-			steps: [{ down: [{ actionId: 'macro_play', options: { value: macro } }], up: [] }],
-			feedbacks: [{ feedbackId: 'macro_active', options: { macro }, style: { bgcolor: 0xffa500, color: 0x000000 } }],
+			style: {
+				text: `Macro\n${macro}`,
+				size: 10,
+				color: 0xffffff,
+				bgcolor: 0x285b0b,
+				png64: SUITE_BADGES[1],
+				pngalignment: 'left:bottom',
+			},
+			steps: [{ down: [{ actionId: 'macro_play', options: { suite: 'suite1a', value: macro } }], up: [] }],
+			feedbacks: [
+				{
+					feedbackId: 'macro_button_state',
+					options: { automaticLabel: true },
+				},
+			],
 		}
 	}
 	for (const [aux, source] of [
