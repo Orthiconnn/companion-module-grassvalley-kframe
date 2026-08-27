@@ -9,6 +9,7 @@
 		"package": "run build && companion-module-build",
 		"build": "rimraf dist && run build:main",
 		"build:main": "tsc -p tsconfig.build.json",
+		"test": "run build && node test/test-builders.cjs && node test/test-legacy-actions.mjs",
 		"dev": "tsc -p tsconfig.build.json --watch",
 		"lint:raw": "eslint",
 		"lint": "run lint:raw ."

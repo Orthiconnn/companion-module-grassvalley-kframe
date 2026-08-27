@@ -1,30 +1,254 @@
 import type ModuleInstance from './main.js'
+import { buildButtonMapping, buildGpi, buildPbusRecall, buildPbusTrigger, buildRun } from './legacy-actions.js'
+
+type NumberOption = { options: { value: number } }
+type EmptyOptions = { options: Record<string, never> }
 
 export type ActionsSchema = {
-	sample_action: {
-		options: {
-			num: number
-		}
-	}
+	connect: EmptyOptions
+	disconnect: EmptyOptions
+	macro_play: NumberOption
+	macro_stop: NumberOption
+	macro_stop_all: EmptyOptions
+	aux_route: { options: { aux: number; source: number; transition: string } }
+	crosspoint: { options: { target: string; source: number } }
+	emem: { options: { target: string; register: number } }
+	transition: { options: { target: string; transition: string } }
+	panel_memory: NumberOption
+	image_store: { options: { output: number; image: number } }
+	image_store_input: NumberOption
+	raw_cpl: { options: { command: string } }
+	run: { options: { target: string } }
+	gpi: NumberOption
+	pbus_recall: { options: { pbus: number; register: number } }
+	pbus_trigger: { options: { pbus: number; trigger: number } }
+	button_mapping: { options: { bus: string; shift: number; button: number; source: number } }
+}
+
+const meIndexes: Record<string, number> = { PGM: 3, ME1: 0, ME2: 1, ME3: 2, ME4: 4 }
+const crosspointChoices = Object.keys(meIndexes).flatMap((me) => [
+	...['A', 'B', 'C', 'D'].map((bus) => ({ id: `${me}_${bus}`, label: `${me} ${bus}` })),
+	...Array.from({ length: 6 }, (_, index) => ({ id: `${me}_K${index + 1}`, label: `${me} Key ${index + 1}` })),
+])
+const transitionChoices = Object.keys(meIndexes).flatMap((me) => [
+	{ id: `${me}_PRI`, label: `${me} Primary` },
+	{ id: `${me}_SEC`, label: `${me} Secondary` },
+	...Array.from({ length: 6 }, (_, index) => ({ id: `${me}_KEY${index + 1}`, label: `${me} Key ${index + 1}` })),
+])
+const ememChoices = [
+	{ id: 'MASTER', label: 'Master' },
+	...Object.keys(meIndexes).flatMap((me) =>
+		['PRI', 'SEC', 'BOTH'].map((mode) => ({ id: `${me}-${mode}`, label: `${me} ${mode}` })),
+	),
+	...['PRI', 'SEC', 'BOTH'].map((mode) => ({ id: `eDPM-${mode}`, label: `eDPM ${mode}` })),
+]
+const runChoices = ememChoices
+
+function resultOrThrow(result: { success: boolean; message: string }): void {
+	if (!result.success) throw new Error(result.message)
 }
 
 export function UpdateActions(self: ModuleInstance): void {
+	const p = self.protocol
 	self.setActionDefinitions({
-		sample_action: {
-			name: 'My First Action',
+		connect: { name: 'Connection: Connect', options: [], callback: async () => self.connectFrame() },
+		disconnect: { name: 'Connection: Disconnect', options: [], callback: async () => self.disconnectFrame() },
+		macro_play: {
+			name: 'Macro: Play / Continue',
+			options: [{ id: 'value', type: 'number', label: 'Macro', default: 1, min: 1, max: 999 }],
+			callback: (e) => resultOrThrow(p.raw.sendMacro(p.id, Number(e.options.value))),
+		},
+		macro_stop: {
+			name: 'Macro: Stop',
+			options: [{ id: 'value', type: 'number', label: 'Macro', default: 1, min: 1, max: 999 }],
+			callback: (e) => resultOrThrow(p.raw.sendMacroStop(p.id, Number(e.options.value))),
+		},
+		macro_stop_all: {
+			name: 'Macro: Stop All',
+			options: [],
+			callback: () => resultOrThrow(p.raw.sendMacroStopAll(p.id)),
+		},
+		aux_route: {
+			name: 'AUX: Route Source',
 			options: [
+				{ id: 'aux', type: 'number', label: 'AUX', default: 1, min: 1, max: 96 },
+				{ id: 'source', type: 'number', label: 'Source', default: 1, min: 1, max: 850 },
 				{
-					id: 'num',
-					type: 'number',
-					label: 'Test',
-					default: 5,
-					min: 0,
-					max: 100,
+					id: 'transition',
+					type: 'dropdown',
+					label: 'Transition',
+					default: 'cut',
+					choices: [
+						{ id: 'cut', label: 'Cut' },
+						{ id: 'mix', label: 'Auto/Mix' },
+						{ id: 'wipe', label: 'Wipe' },
+					],
 				},
 			],
-			callback: async (event) => {
-				console.log('Hello world!', event.options.num)
+			callback: (e) =>
+				resultOrThrow(
+					p.raw.sendAuxRoute(p.id, Number(e.options.aux), Number(e.options.source), String(e.options.transition)),
+				),
+		},
+		crosspoint: {
+			name: 'Crosspoint: Route Source',
+			options: [
+				{ id: 'target', type: 'dropdown', label: 'Bus / Keyer', default: 'PGM_A', choices: crosspointChoices },
+				{ id: 'source', type: 'number', label: 'Source', default: 1, min: 1, max: 809 },
+			],
+			callback: (e) => {
+				const [me, bus] = String(e.options.target).split('_')
+				const index = meIndexes[me]
+				if (index === undefined || !bus) throw new Error('Invalid crosspoint target')
+				const key = /^K([1-6])$/.exec(bus)
+				const offset = key ? (Number(key[1]) - 1) * 0x10 : ['A', 'B', 'C', 'D'].indexOf(bus) * 0x10
+				if (offset < 0) throw new Error('Invalid crosspoint bus')
+				resultOrThrow(
+					p.raw.sendCrosspoint(
+						p.id,
+						key ? 0x103a : 0x104a,
+						(key ? 0x08000000 : 0x04000000) + offset + index,
+						Number(e.options.source),
+					),
+				)
 			},
+		},
+		emem: {
+			name: 'E-MEM: Recall',
+			options: [
+				{ id: 'target', type: 'dropdown', label: 'Target', default: 'MASTER', choices: ememChoices },
+				{ id: 'register', type: 'number', label: 'Register', default: 0, min: 0, max: 999 },
+			],
+			callback: (e) => {
+				const target = String(e.options.target),
+					register = Number(e.options.register)
+				if (target === 'MASTER') return resultOrThrow(p.raw.sendEMem(p.id, register))
+				const [me, modeName] = target.split('-')
+				const index = me === 'eDPM' ? 10 : meIndexes[me]
+				const mode = { PRI: 0, SEC: 1, BOTH: 2 }[modeName]
+				if (index === undefined || mode === undefined) throw new Error('Invalid E-MEM target')
+				resultOrThrow(p.raw.sendEMemTargeted(p.id, register, 0x02000000 + index, mode))
+			},
+		},
+		transition: {
+			name: 'Transition: Cut / Auto',
+			options: [
+				{ id: 'target', type: 'dropdown', label: 'Target', default: 'PGM_PRI', choices: transitionChoices },
+				{
+					id: 'transition',
+					type: 'dropdown',
+					label: 'Transition',
+					default: 'cut',
+					choices: [
+						{ id: 'cut', label: 'Cut' },
+						{ id: 'auto', label: 'Auto' },
+					],
+				},
+			],
+			callback: (e) => {
+				const [me, bus] = String(e.options.target).split('_')
+				const index = meIndexes[me]
+				if (index === undefined || !bus) throw new Error('Invalid transition target')
+				const key = /^KEY([1-6])$/.exec(bus)
+				const did = key
+					? 0x08000000 + (Number(key[1]) - 1) * 0x10 + index
+					: 0x03000000 + (bus === 'SEC' ? 0x10 : 0) + index
+				resultOrThrow(p.raw.sendTransitionEvent(p.id, String(e.options.transition) === 'cut' ? 0x44 : 0x43, did))
+			},
+		},
+		panel_memory: {
+			name: 'Panel Memory: Recall',
+			options: [{ id: 'value', type: 'number', label: 'Register', default: 1, min: 1, max: 99 }],
+			callback: (e) => resultOrThrow(p.raw.sendPanelMem(p.id, Number(e.options.value))),
+		},
+		image_store: {
+			name: 'Image Store: Select Image',
+			options: [
+				{ id: 'output', type: 'number', label: 'Output', default: 1, min: 1, max: 10 },
+				{ id: 'image', type: 'number', label: 'Image', default: 1, min: 1, max: 8999 },
+			],
+			callback: (e) => resultOrThrow(p.raw.sendImageStore(p.id, Number(e.options.output), Number(e.options.image))),
+		},
+		image_store_input: {
+			name: 'Image Store: Select Input',
+			options: [{ id: 'value', type: 'number', label: 'Input', default: 1, min: 1, max: 850 }],
+			callback: (e) => resultOrThrow(p.raw.sendImageStoreInput(p.id, Number(e.options.value))),
+		},
+		raw_cpl: {
+			name: 'Advanced: Send Raw CPL',
+			options: [{ id: 'command', type: 'textinput', label: 'Hex command', default: '' }],
+			callback: (e) => resultOrThrow(p.raw.sendRawCommand(p.id, String(e.options.command))),
+		},
+		run: {
+			name: 'Timeline: RUN',
+			options: [{ id: 'target', type: 'dropdown', label: 'Target', default: 'MASTER', choices: runChoices }],
+			callback: (e) => resultOrThrow(p.raw.sendRawCommand(p.id, buildRun(String(e.options.target)))),
+		},
+		gpi: {
+			name: 'GPI: Fire',
+			options: [{ id: 'value', type: 'number', label: 'GPI', default: 1, min: 1, max: 40 }],
+			callback: (e) => resultOrThrow(p.raw.sendRawCommand(p.id, buildGpi(Number(e.options.value)))),
+		},
+		pbus_recall: {
+			name: 'PBUS: Recall Register',
+			options: [
+				{ id: 'pbus', type: 'number', label: 'PBUS', default: 1, min: 1, max: 24 },
+				{ id: 'register', type: 'number', label: 'Register', default: 0, min: 0, max: 299 },
+			],
+			callback: async (e) => {
+				const commands = buildPbusRecall(Number(e.options.pbus), Number(e.options.register))
+				resultOrThrow(p.raw.sendRawCommand(p.id, commands[0]))
+				await new Promise((resolve) => setTimeout(resolve, 50))
+				resultOrThrow(p.raw.sendRawCommand(p.id, commands[1]))
+			},
+		},
+		pbus_trigger: {
+			name: 'PBUS: Fire Trigger',
+			options: [
+				{ id: 'pbus', type: 'number', label: 'PBUS', default: 1, min: 1, max: 24 },
+				{ id: 'trigger', type: 'number', label: 'Trigger', default: 0, min: 0, max: 12 },
+			],
+			callback: async (e) => {
+				const [clear, select, fire] = buildPbusTrigger(Number(e.options.pbus), Number(e.options.trigger))
+				for (const command of [clear, select, fire, clear]) {
+					resultOrThrow(p.raw.sendRawCommand(p.id, command))
+					await new Promise((resolve) => setTimeout(resolve, 50))
+				}
+			},
+		},
+		button_mapping: {
+			name: 'Panel: Map Button to Source',
+			options: [
+				{
+					id: 'bus',
+					type: 'dropdown',
+					label: 'Bus',
+					default: 'program',
+					choices: [
+						{ id: 'program', label: 'Program' },
+						{ id: 'me1', label: 'M/E 1' },
+						{ id: 'me2', label: 'M/E 2' },
+						{ id: 'me3', label: 'M/E 3' },
+						{ id: 'me4', label: 'M/E 4' },
+						{ id: 'aux', label: 'AUX' },
+					],
+				},
+				{ id: 'shift', type: 'number', label: 'Shift', default: 1, min: 1, max: 4 },
+				{ id: 'button', type: 'number', label: 'Button', default: 1, min: 1, max: 35 },
+				{ id: 'source', type: 'number', label: 'Source', default: 1, min: 1, max: 809 },
+			],
+			callback: (e) =>
+				resultOrThrow(
+					p.raw.sendRawCommand(
+						p.id,
+						buildButtonMapping(
+							String(e.options.bus),
+							Number(e.options.shift),
+							Number(e.options.button),
+							Number(e.options.source),
+						),
+					),
+				),
 		},
 	})
 }
