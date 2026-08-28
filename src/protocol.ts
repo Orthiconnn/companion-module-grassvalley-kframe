@@ -43,6 +43,7 @@ export type ProtocolManager = {
 	sendEMemTargeted(id: string, register: number, did: number, mode: number): CommandResult
 	sendCrosspoint(id: string, pid: number, did: number, source: number): CommandResult
 	sendTransitionEvent(id: string, eid: number, did: number): CommandResult
+	sendTimelineEvent(id: string, eid: number, did: number, data: number[]): CommandResult
 	sendPanelMem(id: string, register: number): CommandResult
 	sendImageStore(id: string, output: number, image: number): CommandResult
 	sendImageStoreInput(id: string, input: number): CommandResult

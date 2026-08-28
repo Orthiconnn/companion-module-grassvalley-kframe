@@ -9,6 +9,7 @@ export type FeedbacksSchema = {
 	macro_active: { type: 'boolean'; options: SuiteOptions & { macro: number } }
 	macro_button_state: { type: 'advanced'; options: { automaticLabel: boolean } }
 	aux_button_state: { type: 'advanced'; options: { automaticLabel: boolean } }
+	crosspoint_button_state: { type: 'advanced'; options: { automaticLabel: boolean } }
 	suite_badge: { type: 'advanced'; options: Record<string, never> }
 }
 
@@ -105,7 +106,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				const paused = status === 7
 				const playing = status !== null && status !== 0 && !paused
 				const lastPlayed = !playing && !paused && runState?.lastPlayedMacro === assignment.macro
-				const macroName = self.macroDisplayName(assignment.suite, assignment.macro)
+				const macroName = assignment.labelOverride || self.macroDisplayName(assignment.suite, assignment.macro)
 				const bgcolor = paused
 					? self.macroFlashOn
 						? 0x8ee68e
@@ -142,14 +143,58 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				const connectionId = self.connectionId(assignment.suite)
 				const sourceName = self.protocol.resolveSourceDisplayName(connectionId, assignment.source)
 				const online = self.protocol.getAuxSource(connectionId, assignment.aux) === assignment.source
-				const sourceLabel = sourceName ? `${assignment.source} — ${sourceName}` : `Source ${assignment.source}`
+				const sourceLabel = assignment.labelOverride || sourceName || String(assignment.source)
 				return {
-					...(feedback.options.automaticLabel ? { text: `AUX ${assignment.aux}\n${sourceLabel}` } : {}),
+					...(feedback.options.automaticLabel ? { text: `AUX ${assignment.aux}\n\n${sourceLabel}` } : {}),
 					png64: SUITE_BADGES[suiteNumber(assignment.suite)],
 					pngalignment: 'left:bottom',
 					bgcolor: online ? 0xb57edc : 0x5c005c,
 					color: online ? 0x000000 : 0xffffff,
 					size: 10,
+					alignment: 'center:center',
+				}
+			},
+		},
+		crosspoint_button_state: {
+			name: 'Crosspoint source name, suite badge, and high tally',
+			type: 'advanced',
+			options: [
+				{
+					id: 'automaticLabel',
+					type: 'checkbox',
+					label: 'Automatically show frame Source name',
+					default: true,
+				},
+			],
+			callback: (feedback) => {
+				const assignment = self.crosspointButtons.get(feedback.controlId)
+				if (!assignment) return {}
+				const [me, bus] = assignment.target.split('_')
+				const meIndex: Record<string, number> = { ME1: 0, ME2: 1, ME3: 2, PGM: 3, ME4: 4 }
+				const index = meIndex[me]
+				const busOffset = ['A', 'B', 'C', 'D'].indexOf(bus) * 0x10
+				const address = index === undefined || busOffset < 0 ? -1 : index + busOffset
+				const connectionId = self.connectionId(assignment.suite)
+				const online = address >= 0 && self.protocol.getMESource(connectionId, address) === assignment.source
+				const sourceName = self.protocol.resolveSourceDisplayName(connectionId, assignment.source)
+				const sourceLabel = assignment.labelOverride || sourceName || String(assignment.source)
+				const baseColors: Record<string, { bright: number; dark: number; color: number }> = {
+					ME1: { bright: 0x2e9d55, dark: 0x1d6538, color: 0xffffff },
+					ME2: { bright: 0xffd21f, dark: 0xb08c00, color: 0x000000 },
+					ME3: { bright: 0xff7a18, dark: 0xa84b00, color: 0x000000 },
+					ME4: { bright: 0x9b59b6, dark: 0x633974, color: 0xffffff },
+					PGM: { bright: 0xd93636, dark: 0x8d2020, color: 0xffffff },
+				}
+				const base = baseColors[me] ?? { bright: 0x444444, dark: 0x222222, color: 0xffffff }
+				const busLabel = /^K([1-6])$/.test(bus) ? `${me} ${bus}` : `${me}${bus}`
+				return {
+					...(feedback.options.automaticLabel ? { text: `${busLabel}\n\n${sourceLabel}` } : {}),
+					png64: SUITE_BADGES[suiteNumber(assignment.suite)],
+					pngalignment: 'left:bottom',
+					bgcolor: online ? 0xff0000 : bus === 'A' ? base.bright : base.dark,
+					color: online ? 0xffffff : base.color,
+					size: 10,
+					alignment: 'center:center',
 				}
 			},
 		},

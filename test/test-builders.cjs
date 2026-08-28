@@ -154,6 +154,33 @@ assertEqual(
 	`0004${seqHex}000200060000000a0000001214d2030022000000${(50).toString(16).padStart(4, '0')}`,
 )
 
+console.log('Timeline edit/navigation:')
+const timelineDid = 0x35000001
+assertEqual(
+	'run master',
+	h.buildSetEvent(0x0002, timelineDid, Buffer.alloc(0)),
+	`0004${seqHex}00020005000000080000000f0002000035000001`,
+)
+assertEqual(
+	'run ME1',
+	h.buildSetEvent(0x0002, 0x02000000, Buffer.alloc(0)),
+	`0004${seqHex}00020005000000080000000f0002000002000000`,
+)
+const timelineVectors = [
+	['previous', 0x006b, [0x01, 0xff, 0xff], '0000000b00000012006b00003500000101ffff'],
+	['next', 0x006b, [0x01, 0x00, 0x01], '0000000b00000012006b000035000001010001'],
+	['insert before', 0x006c, [0x00], '0000000900000010006c00003500000100'],
+	['insert after', 0x006c, [0x01], '0000000900000010006c00003500000101'],
+	['go beginning', 0x006b, [0x04], '0000000900000010006b00003500000104'],
+	['go end', 0x006b, [0x05], '0000000900000010006b00003500000105'],
+	['mod', 0x006d, [0x00], '0000000900000010006d00003500000100'],
+	['mod all', 0x006d, [0x01], '0000000900000010006d00003500000101'],
+	['mod all absolute', 0x006d, [0x02], '0000000900000010006d00003500000102'],
+]
+for (const [name, eid, data, tail] of timelineVectors) {
+	assertEqual(name, h.buildSetEvent(eid, timelineDid, Buffer.from(data)), `0004${seqHex}00020005${tail}`)
+}
+
 // ─── B1: All 50 crosspoint targets ──────────────────────────
 
 console.log('\nCrosspoint targets (50 entries):')

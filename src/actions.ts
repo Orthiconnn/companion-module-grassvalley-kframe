@@ -1,9 +1,9 @@
 import type ModuleInstance from './main.js'
 import { suiteId } from './main.js'
-import { buildButtonMapping, buildGpi, buildPbusRecall, buildPbusTrigger, buildRun } from './legacy-actions.js'
+import { buildButtonMapping, buildGpi, buildPbusRecall, buildPbusTrigger } from './legacy-actions.js'
 
 type SuiteOption = { suite?: string }
-type NumberOption = { options: SuiteOption & { value: number } }
+type NumberOption = { options: SuiteOption & { value: number; labelOverride?: string } }
 type SuiteOnly = { options: SuiteOption }
 
 export type ActionsSchema = {
@@ -13,8 +13,8 @@ export type ActionsSchema = {
 	macro_play: NumberOption
 	macro_stop: NumberOption
 	macro_stop_all: SuiteOnly
-	aux_route: { options: SuiteOption & { aux: number; source: number; transition: string } }
-	crosspoint: { options: SuiteOption & { target: string; source: number } }
+	aux_route: { options: SuiteOption & { aux: number; source: number; transition: string; labelOverride?: string } }
+	crosspoint: { options: SuiteOption & { target: string; source: number; labelOverride?: string } }
 	emem: { options: SuiteOption & { target: string; register: number } }
 	transition: { options: SuiteOption & { target: string; transition: string } }
 	panel_memory: NumberOption
@@ -22,6 +22,7 @@ export type ActionsSchema = {
 	image_store_input: NumberOption
 	raw_cpl: { options: SuiteOption & { command: string } }
 	run: { options: SuiteOption & { target: string } }
+	timeline_edit: { options: SuiteOption & { target: string; command: string } }
 	gpi: NumberOption
 	pbus_recall: { options: SuiteOption & { pbus: number; register: number } }
 	pbus_trigger: { options: SuiteOption & { pbus: number; trigger: number } }
@@ -46,7 +47,22 @@ const ememChoices = [
 	),
 	...['PRI', 'SEC', 'BOTH'].map((mode) => ({ id: `eDPM-${mode}`, label: `eDPM ${mode}` })),
 ]
-const runChoices = ememChoices
+const timelineTargetChoices = [
+	{ id: 'MASTER', label: 'Master' },
+	...Object.keys(meIndexes).map((me) => ({ id: me, label: me })),
+	{ id: 'eDPM', label: 'eDPM' },
+]
+const timelineCommands: Record<string, { eid: number; data: number[] }> = {
+	previous: { eid: 0x006b, data: [0x01, 0xff, 0xff] },
+	next: { eid: 0x006b, data: [0x01, 0x00, 0x01] },
+	insert_before: { eid: 0x006c, data: [0x00] },
+	insert_after: { eid: 0x006c, data: [0x01] },
+	go_beginning: { eid: 0x006b, data: [0x04] },
+	go_end: { eid: 0x006b, data: [0x05] },
+	mod: { eid: 0x006d, data: [0x00] },
+	mod_all: { eid: 0x006d, data: [0x01] },
+	mod_all_absolute: { eid: 0x006d, data: [0x02] },
+}
 
 function resultOrThrow(result: { success: boolean; message: string }): void {
 	if (!result.success) throw new Error(result.message)
@@ -57,6 +73,13 @@ export function UpdateActions(self: ModuleInstance): void {
 	const auxSourceChoices = self.sourceChoices(850)
 	const crosspointSourceChoices = self.sourceChoices(809)
 	const macroChoices = self.macroChoices()
+	const labelOverrideOption = {
+		id: 'labelOverride' as const,
+		type: 'textinput' as const,
+		label: 'Text label override',
+		default: '',
+		useVariables: true,
+	}
 	const suiteOption = {
 		id: 'suite' as const,
 		type: 'dropdown' as const,
@@ -116,9 +139,16 @@ export function UpdateActions(self: ModuleInstance): void {
 					regex: '^([1-9]|[1-9][0-9]|[1-9][0-9]{2})$',
 					minChoicesForSearch: 8,
 				},
+				labelOverrideOption,
 			],
-			optionsToMonitorForSubscribe: ['suite', 'value'],
-			subscribe: (action) => self.trackMacroButton(action.controlId, action.options.suite, action.options.value),
+			optionsToMonitorForSubscribe: ['suite', 'value', 'labelOverride'],
+			subscribe: (action) =>
+				self.trackMacroButton(
+					action.controlId,
+					action.options.suite,
+					action.options.value,
+					action.options.labelOverride,
+				),
 			unsubscribe: (action) => self.untrackMacroButton(action.controlId),
 			callback: (e) => resultOrThrow(p.sendMacro(id(e), Number(e.options.value))),
 		},
@@ -148,9 +178,15 @@ export function UpdateActions(self: ModuleInstance): void {
 		},
 		aux_route: {
 			name: 'AUX: Route Source',
-			optionsToMonitorForSubscribe: ['suite', 'aux', 'source'],
+			optionsToMonitorForSubscribe: ['suite', 'aux', 'source', 'labelOverride'],
 			subscribe: (action) =>
-				self.trackAuxButton(action.controlId, action.options.suite, action.options.aux, action.options.source),
+				self.trackAuxButton(
+					action.controlId,
+					action.options.suite,
+					action.options.aux,
+					action.options.source,
+					action.options.labelOverride,
+				),
 			unsubscribe: (action) => self.untrackAuxButton(action.controlId),
 			options: [
 				suiteOption,
@@ -176,6 +212,7 @@ export function UpdateActions(self: ModuleInstance): void {
 						{ id: 'wipe', label: 'Wipe' },
 					],
 				},
+				labelOverrideOption,
 			],
 			callback: (e) =>
 				resultOrThrow(
@@ -184,7 +221,16 @@ export function UpdateActions(self: ModuleInstance): void {
 		},
 		crosspoint: {
 			name: 'Crosspoint: Route Source',
-			...suiteSubscription,
+			optionsToMonitorForSubscribe: ['suite', 'target', 'source', 'labelOverride'],
+			subscribe: (action) =>
+				self.trackCrosspointButton(
+					action.controlId,
+					action.options.suite,
+					action.options.target,
+					action.options.source,
+					action.options.labelOverride,
+				),
+			unsubscribe: (action) => self.untrackCrosspointButton(action.controlId),
 			options: [
 				suiteOption,
 				{ id: 'target', type: 'dropdown', label: 'Bus / Keyer', default: 'PGM_A', choices: crosspointChoices },
@@ -198,6 +244,7 @@ export function UpdateActions(self: ModuleInstance): void {
 					regex: '^([1-9]|[1-9][0-9]|[1-7][0-9]{2}|80[0-9])$',
 					minChoicesForSearch: 8,
 				},
+				labelOverrideOption,
 			],
 			callback: (e) => {
 				const [me, bus] = String(e.options.target).split('_')
@@ -302,9 +349,48 @@ export function UpdateActions(self: ModuleInstance): void {
 			...suiteSubscription,
 			options: [
 				suiteOption,
-				{ id: 'target', type: 'dropdown', label: 'Target', default: 'MASTER', choices: runChoices },
+				{ id: 'target', type: 'dropdown', label: 'Target', default: 'MASTER', choices: timelineTargetChoices },
 			],
-			callback: (e) => resultOrThrow(p.sendRawCommand(id(e), buildRun(String(e.options.target)))),
+			callback: (e) => {
+				const target = String(e.options.target)
+				const engine = target.split('-')[0]
+				const did = target === 'MASTER' ? 0x35000001 : 0x02000000 + (engine === 'eDPM' ? 10 : meIndexes[engine])
+				if (!Number.isInteger(did)) throw new Error('Invalid timeline RUN target')
+				resultOrThrow(p.sendTimelineEvent(id(e), 0x0002, did, []))
+			},
+		},
+		timeline_edit: {
+			name: 'Timeline: Edit / Navigate',
+			...suiteSubscription,
+			options: [
+				suiteOption,
+				{ id: 'target', type: 'dropdown', label: 'Target', default: 'MASTER', choices: timelineTargetChoices },
+				{
+					id: 'command',
+					type: 'dropdown',
+					label: 'Command',
+					default: 'next',
+					choices: [
+						{ id: 'previous', label: 'Previous Keyframe' },
+						{ id: 'next', label: 'Next Keyframe' },
+						{ id: 'insert_before', label: 'Insert Before' },
+						{ id: 'insert_after', label: 'Insert After' },
+						{ id: 'go_beginning', label: 'Go to Beginning' },
+						{ id: 'go_end', label: 'Go to End' },
+						{ id: 'mod', label: 'Mod' },
+						{ id: 'mod_all', label: 'Mod All' },
+						{ id: 'mod_all_absolute', label: 'Mod All Absolute' },
+					],
+				},
+			],
+			callback: (e) => {
+				const command = timelineCommands[String(e.options.command)]
+				if (!command) throw new Error('Invalid timeline command')
+				const target = String(e.options.target)
+				const did = target === 'MASTER' ? 0x35000001 : 0x02000000 + (target === 'eDPM' ? 10 : meIndexes[target])
+				if (!Number.isInteger(did)) throw new Error('Invalid timeline target')
+				resultOrThrow(p.sendTimelineEvent(id(e), command.eid, did, command.data))
+			},
 		},
 		gpi: {
 			name: 'GPI: Fire',

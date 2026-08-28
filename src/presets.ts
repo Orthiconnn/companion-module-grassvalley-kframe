@@ -8,6 +8,10 @@ export function UpdatePresets(self: ModuleInstance): void {
 	const suiteBadgeFeedback = () => ({ feedbackId: 'suite_badge' as const, options: {} })
 	const macroFeedback = () => ({ feedbackId: 'macro_button_state' as const, options: { automaticLabel: true } })
 	const auxFeedback = () => ({ feedbackId: 'aux_button_state' as const, options: { automaticLabel: true } })
+	const crosspointFeedback = () => ({
+		feedbackId: 'crosspoint_button_state' as const,
+		options: { automaticLabel: true },
+	})
 	const source1Label = self.sourceDisplayName(1)
 	const busFamilies = [
 		{ id: 'me1', target: 'ME1', label: 'ME1', mappingBus: 'me1', bright: 0x2e9d55, dark: 0x1d6538, text: 0xffffff },
@@ -22,6 +26,25 @@ export function UpdatePresets(self: ModuleInstance): void {
 	const pbusRecallPresetIds = Array.from({ length: 8 }, (_, index) => `pbus-recall${index + 1}`)
 	const pbusTriggerPresetIds = Array.from({ length: 8 }, (_, index) => `pbus-trigger${index + 1}`)
 	const gpiPresetIds = Array.from({ length: 32 }, (_, index) => `gpi${index + 1}`)
+	const timelineRunPresets = [
+		['timeline-run-master', 'MASTER', 'MASTER'],
+		['timeline-run-me1', 'ME1-BOTH', 'ME1'],
+		['timeline-run-me2', 'ME2-BOTH', 'ME2'],
+		['timeline-run-me3', 'ME3-BOTH', 'ME3'],
+		['timeline-run-me4', 'ME4-BOTH', 'ME4'],
+		['timeline-run-pgm', 'PGM-BOTH', 'PGM'],
+	] as const
+	const timelineEditPresets = [
+		['timeline-previous', 'previous', 'PREVIOUS'],
+		['timeline-next', 'next', 'NEXT'],
+		['timeline-insert-before', 'insert_before', 'INSERT\nBEFORE'],
+		['timeline-insert-after', 'insert_after', 'INSERT\nAFTER'],
+		['timeline-go-beginning', 'go_beginning', 'GO TO\nBEGINNING'],
+		['timeline-go-end', 'go_end', 'GO TO\nEND'],
+		['timeline-mod', 'mod', 'MOD'],
+		['timeline-mod-all', 'mod_all', 'MOD ALL'],
+		['timeline-mod-all-absolute', 'mod_all_absolute', 'MOD ALL\nABSOLUTE'],
+	] as const
 	const structure: CompanionPresetSection[] = [
 		{
 			id: 'connections',
@@ -81,6 +104,11 @@ export function UpdatePresets(self: ModuleInstance): void {
 				'emem-pgm-primary-0',
 				'emem-pgm-secondary-0',
 			],
+		},
+		{
+			id: 'timeline',
+			name: 'Timeline',
+			definitions: [...timelineRunPresets.map(([id]) => id), ...timelineEditPresets.map(([id]) => id)],
 		},
 		{
 			id: 'transitions',
@@ -305,7 +333,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 						up: [],
 					},
 				],
-				feedbacks: [suiteBadgeFeedback()],
+				feedbacks: [crosspointFeedback()],
 			}
 		}
 	}
@@ -456,6 +484,26 @@ export function UpdatePresets(self: ModuleInstance): void {
 				],
 				feedbacks: [suiteBadgeFeedback()],
 			}
+		}
+	}
+	for (const [presetId, target, label] of timelineRunPresets) {
+		presets[presetId] = {
+			type: 'simple',
+			name: `Timeline Run ${label}`,
+			style: { text: `${label}\nRUN`, size: 10, color: 0xffffff, bgcolor: 0x006d77, ...suiteBadgeStyle },
+			steps: [{ down: [{ actionId: 'run', options: { suite: 'suite1a', target } }], up: [] }],
+			feedbacks: [suiteBadgeFeedback()],
+		}
+	}
+	for (const [presetId, command, label] of timelineEditPresets) {
+		presets[presetId] = {
+			type: 'simple',
+			name: `Timeline ${label.replace('\n', ' ')}`,
+			style: { text: label, size: 10, color: 0xffffff, bgcolor: 0x264653, ...suiteBadgeStyle },
+			steps: [
+				{ down: [{ actionId: 'timeline_edit', options: { suite: 'suite1a', target: 'MASTER', command } }], up: [] },
+			],
+			feedbacks: [suiteBadgeFeedback()],
 		}
 	}
 	const referencedPresets = new Set<string>()

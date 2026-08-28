@@ -45,8 +45,12 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	readonly suiteStates = Object.fromEntries(
 		SUITES.map((id) => [id, { status: 'disconnected', frameVersion: '', protocolName: '', heartbeatFlash: false }]),
 	) as Record<SuiteId, SuiteState>
-	readonly macroButtons = new Map<string, { suite: SuiteId; macro: number }>()
-	readonly auxButtons = new Map<string, { suite: SuiteId; aux: number; source: number }>()
+	readonly macroButtons = new Map<string, { suite: SuiteId; macro: number; labelOverride: string }>()
+	readonly auxButtons = new Map<string, { suite: SuiteId; aux: number; source: number; labelOverride: string }>()
+	readonly crosspointButtons = new Map<
+		string,
+		{ suite: SuiteId; target: string; source: number; labelOverride: string }
+	>()
 	readonly suiteButtons = new Map<string, Map<string, SuiteId>>()
 	private sourceRefreshTimer?: NodeJS.Timeout
 	private macroCatalogRefreshTimer?: NodeJS.Timeout
@@ -63,6 +67,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		protocol.clientEmitter.on('status', this.handleProtocolStatus)
 		protocol.clientEmitter.on('sourceNamesUpdated', this.handleSourceNamesUpdated)
 		protocol.clientEmitter.on('auxStateChanged', this.handleAuxStateChanged)
+		protocol.clientEmitter.on('meStateChanged', this.handleMEStateChanged)
 
 		this.updateActions() // export actions
 		this.updateFeedbacks() // export feedbacks
@@ -83,6 +88,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		protocol.clientEmitter.off('status', this.handleProtocolStatus)
 		protocol.clientEmitter.off('sourceNamesUpdated', this.handleSourceNamesUpdated)
 		protocol.clientEmitter.off('auxStateChanged', this.handleAuxStateChanged)
+		protocol.clientEmitter.off('meStateChanged', this.handleMEStateChanged)
 		await Promise.all(SUITES.map(async (id) => protocol.disconnectConnection(this.connectionId(id))))
 	}
 
@@ -111,13 +117,18 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			this.sourceRefreshTimer = undefined
 			this.updateActions()
 			this.updatePresets()
-			this.checkFeedbacks('aux_button_state')
+			this.checkFeedbacks('aux_button_state', 'crosspoint_button_state')
 		}, 100)
 	}
 
 	private handleAuxStateChanged = (connectionId: string): void => {
 		if (!SUITES.some((suite) => this.connectionId(suite) === connectionId)) return
 		this.checkFeedbacks('aux_button_state')
+	}
+
+	private handleMEStateChanged = (connectionId: string): void => {
+		if (!SUITES.some((suite) => this.connectionId(suite) === connectionId)) return
+		this.checkFeedbacks('crosspoint_button_state')
 	}
 
 	private handleProtocolStatus = (connectionId: string, type: string, message: unknown): void => {
@@ -209,9 +220,13 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		if (!result.success) this.log('warn', result.message)
 	}
 
-	trackMacroButton(controlId: string, suite: unknown, macro: unknown): void {
+	trackMacroButton(controlId: string, suite: unknown, macro: unknown, labelOverride: unknown = ''): void {
 		const targetSuite = suiteId(suite)
-		this.macroButtons.set(controlId, { suite: targetSuite, macro: Number(macro) || 1 })
+		this.macroButtons.set(controlId, {
+			suite: targetSuite,
+			macro: Number(macro) || 1,
+			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
+		})
 		this.checkFeedbacks('macro_button_state')
 	}
 
@@ -220,15 +235,40 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.checkFeedbacks('macro_button_state')
 	}
 
-	trackAuxButton(controlId: string, suite: unknown, aux: unknown, source: unknown): void {
+	trackAuxButton(controlId: string, suite: unknown, aux: unknown, source: unknown, labelOverride: unknown = ''): void {
 		const targetSuite = suiteId(suite)
 		this.auxButtons.set(controlId, {
 			suite: targetSuite,
 			aux: Number(aux) || 1,
 			source: Number(source) || 1,
+			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
 		})
 		this.trackSuiteButton(controlId, 'aux_route', targetSuite)
 		this.checkFeedbacks('aux_button_state')
+	}
+
+	trackCrosspointButton(
+		controlId: string,
+		suite: unknown,
+		target: unknown,
+		source: unknown,
+		labelOverride: unknown = '',
+	): void {
+		const targetSuite = suiteId(suite)
+		this.crosspointButtons.set(controlId, {
+			suite: targetSuite,
+			target: String(target),
+			source: Number(source) || 1,
+			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
+		})
+		this.trackSuiteButton(controlId, 'crosspoint', targetSuite)
+		this.checkFeedbacks('crosspoint_button_state')
+	}
+
+	untrackCrosspointButton(controlId: string): void {
+		this.crosspointButtons.delete(controlId)
+		this.untrackSuiteButton(controlId, 'crosspoint')
+		this.checkFeedbacks('crosspoint_button_state')
 	}
 
 	untrackAuxButton(controlId: string): void {
@@ -275,7 +315,14 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 				}),
 			),
 		)
-		this.checkFeedbacks('connected', 'connection_state', 'macro_active', 'macro_button_state', 'aux_button_state')
+		this.checkFeedbacks(
+			'connected',
+			'connection_state',
+			'macro_active',
+			'macro_button_state',
+			'aux_button_state',
+			'crosspoint_button_state',
+		)
 	}
 
 	get protocol(): typeof protocol {
@@ -309,9 +356,9 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	sourceDisplayName(source: number): string {
 		for (const suite of SUITES) {
 			const name = protocol.resolveSourceDisplayName(this.connectionId(suite), source)
-			if (name) return `${source} — ${name}`
+			if (name) return name
 		}
-		return `Source ${source}`
+		return String(source)
 	}
 
 	macroChoices(): DropdownChoice<number>[] {

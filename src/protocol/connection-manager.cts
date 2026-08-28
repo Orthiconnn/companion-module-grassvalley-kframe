@@ -349,6 +349,12 @@ class ConnectionManager {
         return connection.getMESource(address);
     }
 
+    sendTimelineEvent(connectionId, eid, did, data) {
+        const connection = this.connections.get(connectionId);
+        if (!connection) return { success: false, message: `No connection found: ${connectionId}` };
+        return connection.sendTimelineEvent(eid, did, data);
+    }
+
     /**
      * Get all ME state for a connection
      */
@@ -450,6 +456,7 @@ module.exports = {
     isSourceOnAnyAux: (id, sourceNum, excludeAux) => connectionManager.isSourceOnAnyAux(id, sourceNum, excludeAux),
     subscribeToMEBus: (id) => connectionManager.subscribeToMEBus(id),
     getMESource: (id, address) => connectionManager.getMESource(id, address),
+	 sendTimelineEvent: (id, eid, did, data) => connectionManager.sendTimelineEvent(id, eid, did, data),
     getAllMEState: (id) => connectionManager.getAllMEState(id),
     isSourceOnAnyME: (id, sourceNum, excludeAddress) => connectionManager.isSourceOnAnyME(id, sourceNum, excludeAddress),
     subscribeToSourceNames: (id) => connectionManager.subscribeToSourceNames(id),

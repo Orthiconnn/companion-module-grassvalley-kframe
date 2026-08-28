@@ -2127,6 +2127,16 @@ let found = 0;
                 if (err) {
                     this.emitter.emit('status', 'ERROR', `Error sending crosspoint: ${err.message}`);
                 } else {
+                    const address = did & 0xff;
+                    const previousSource = this.meState.get(address) || null;
+                    this.meState.set(address, sourceNum);
+                    if (previousSource !== sourceNum) {
+                        this.emitter.emit('meStateChanged', {
+                            address,
+                            previousSource,
+                            currentSource: sourceNum
+                        });
+                    }
                     this.emitter.emit('status', 'CROSSPOINT_SENT', `PID 0x${pid.toString(16)} DID 0x${did.toString(16)} src ${sourceNum}`);
                 }
             });
@@ -2155,6 +2165,25 @@ let found = 0;
             return { success: true, message: `Transition event sent` };
         } catch (error) {
             return { success: false, message: `Error creating command: ${error.message}` };
+        }
+    }
+
+    sendTimelineEvent(eid, did, data) {
+        if (this.isClosing || this.mainHandshakeStage !== 9) {
+            return { success: false, message: 'Not connected.' };
+        }
+        if (!Number.isInteger(eid) || !Number.isInteger(did) || !Array.isArray(data)) {
+            return { success: false, message: 'Invalid timeline command.' };
+        }
+        try {
+            const payload = this.buildSetEvent(eid, did, Buffer.from(data));
+            this.sendToFrame(payload, (err) => {
+                if (err) this.emitter.emit('status', 'ERROR', `Error sending timeline command: ${err.message}`);
+                else this.emitter.emit('status', 'TIMELINE_SENT', `EID 0x${eid.toString(16)} DID 0x${did.toString(16)}`);
+            });
+            return { success: true, message: 'Timeline command sent' };
+        } catch (error) {
+            return { success: false, message: `Error creating timeline command: ${error.message}` };
         }
     }
 
