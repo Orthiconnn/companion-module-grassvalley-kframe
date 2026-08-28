@@ -87,7 +87,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			if (!paused) return
 			this.timelinePulsePhase = (this.timelinePulsePhase + 1) % 12
 			this.checkFeedbacks('timeline_progress')
-		}, 400)
+		}, 325)
 	}
 	// When module gets deleted
 	async destroy(): Promise<void> {

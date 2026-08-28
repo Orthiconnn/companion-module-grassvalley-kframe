@@ -50,11 +50,11 @@ export const timelineProgressSvg = (
 ): string => {
 	const progress = Math.max(0, Math.min(1, duration > 0 ? cursorTime / duration : 0))
 	const dotX = 48 + progress * 264
-	const trackY = 104
+	const trackY = 64
 	const pulseStep = ((phase % 12) + 12) % 12
-	const dotRadius = paused ? 13 + 3 * Math.sin((pulseStep * Math.PI) / 6) : 13
+	const dotRadius = paused ? 17 + 4 * Math.sin((pulseStep * Math.PI) / 6) : 17
 	const rings = paused
-		? [0, 6]
+		? [0]
 				.map((offset) => {
 					const step = (pulseStep + offset) % 12
 					const radius = 20 + step * 3.5
@@ -63,13 +63,13 @@ export const timelineProgressSvg = (
 				})
 				.join('')
 		: ''
-	const dotFill = paused ? '#ff8c00' : '#ffffff'
-	const dotStroke = paused ? '#b84a00' : '#00cfd5'
+	const dotFill = paused ? '#ff8c00' : '#98e700'
+	const dotStroke = paused ? '#b84a00' : '#4c7300'
 	return Buffer.from(
 		`
 <svg xmlns="http://www.w3.org/2000/svg" width="360" height="360" viewBox="0 0 360 360">
-	<line x1="48" y1="${trackY}" x2="312" y2="${trackY}" stroke="#18383d" stroke-width="20" stroke-linecap="round"/>
-	<line x1="48" y1="${trackY}" x2="${dotX.toFixed(2)}" y2="${trackY}" stroke="#7ffcff" stroke-width="12" stroke-linecap="round"/>
+	<line x1="48" y1="${trackY}" x2="312" y2="${trackY}" stroke="#17351c" stroke-width="26" stroke-linecap="round"/>
+	<line x1="48" y1="${trackY}" x2="${dotX.toFixed(2)}" y2="${trackY}" stroke="#98e700" stroke-width="18" stroke-linecap="round"/>
 	${rings}
 	<circle cx="${dotX.toFixed(2)}" cy="${trackY}" r="${dotRadius.toFixed(2)}" fill="${dotFill}" stroke="${dotStroke}" stroke-width="6"/>
 	<g transform="translate(24 -24)">
