@@ -16,9 +16,15 @@ The first iteration includes native actions for connection, macros, AUX routing,
 
 Connection and macro-active feedbacks, connection variables, and Stream Deck-inspired defaults are included for Macro 1–8, AUX 1–4, E-MEM, Image Store, RUN, recall, trigger, and GPI workflows. This build has passed local byte-vector, TypeScript, lint, package, and Companion loading checks; live switcher or simulator behavior must still be validated before production use.
 
-Macro presets show the selected suite as a circled number in the lower-left. Their automatic-label feedback follows the Macro and Suite fields on the button's Macro action, so changing the Macro field also changes the displayed `Macro N` label. Disable **Automatically show Macro number** on that feedback when using custom button text.
+Macro presets show the selected suite as a circled number in the lower-left. When connected, Macro action dropdowns and automatic button labels use the frame's Macro catalog names. Changing the Macro or Suite field refreshes the button label. Disable **Automatically show frame Macro name** on that feedback when using custom button text.
 
 All suite-targeted action presets use the same padded lower-left suite badge, which follows the Suite field on the button action. AUX defaults provide AUX 1–4 on Source 1. Crosspoint defaults provide A and B sides for M/E 1–4 and Program on Source 1, using brighter A-side and darker B-side family colors. Transition defaults use the matching family colors and provide M/E 1–4 plus Program CUT and AUTO targeting both primary and secondary. E-MEM defaults include a white Master E-MEM 0 button and color-coded Primary/Secondary E-MEM 0 buttons for M/E 1–4 plus red Program Primary/Secondary buttons. PBUS Recall and Trigger defaults cover PBUS devices 1–8 at Register/Trigger 0 in their own section. GPI defaults cover GPI 1–32 in a separate section. Image Store defaults cover Outputs 1–10 at Image 0001. Button Mapping defaults cover Buttons 1–3 on Shifts 1–4 for M/E 1–4 and Program, all mapped to Source 1. Panel Memory defaults cover Registers 1–8.
+
+When a suite is connected, the module subscribes to the frame's source catalog. AUX and Crosspoint actions then offer searchable source dropdowns using the frame's source numbers and names. A numeric source may still be entered manually while offline or when a source is not present in the catalog. Source 1 labels in the preset browser refresh to use the discovered frame name when available; buttons already placed on a page remain user-editable copies. If connected suites disagree about a source name, the lowest-numbered connected suite supplies the dropdown label while the numeric source ID remains authoritative.
+
+AUX presets automatically follow their action's AUX and Source fields. Their labels show the live source number/name, and they turn light purple while that source is online on the selected AUX bus. Disable **Automatically show frame Source name and number** on the AUX feedback to preserve custom button text.
+
+Macro Stop All uses the K-Frame all-macros Stop event and also stops macros paused at a User Wait.
 
 ## Safety
 

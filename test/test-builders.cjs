@@ -75,10 +75,10 @@ assertEqual(
 	`000403${macroIdNum.toString(16).padStart(2, '0')}000200050000000c000000130003000077000000${(macroNum - 1).toString(16).padStart(4, '0')}0000`,
 )
 
-console.log('Macro Stop-All (EID 0x0046):')
-const stopAllResult = h.buildSetEvent(0x0046, 0x77000000)
-assertLength('stop-all length', stopAllResult, 24)
-assertEqual('stop-all', stopAllResult, `0004${seqHex}00020005000000080000000f0046000077000000`)
+console.log('Macro Stop-All (EID 0x0003, all-macros sentinel):')
+const stopAllResult = h.buildSetEvent(0x0003, 0x77000000, Buffer.from([0xff, 0xff, 0xff, 0xff]))
+assertLength('stop-all length', stopAllResult, 28)
+assertEqual('stop-all', stopAllResult, `0004${seqHex}000200050000000c000000130003000077000000ffffffff`)
 
 console.log('Aux Route (cut, aux=5, src=100):')
 const auxNum = 5,

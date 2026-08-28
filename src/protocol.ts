@@ -8,6 +8,8 @@ export type ConnectionInfo = {
 	frameVersion: string | null
 	ports: { main: number; listener: number; dynamic: number }
 }
+export type SourceName = { id: number; oled: string; short: string; eng: string; panel: string; menu: string }
+export type MacroCatalogEntry = { oled?: string; panel?: string; comment?: string }
 
 export type ProtocolManager = {
 	initialize(settings: unknown): void
@@ -24,11 +26,13 @@ export type ProtocolManager = {
 	isConnected(id: string): boolean
 	getConnectionInfo(id: string): ConnectionInfo | null
 	getMacroName(id: string, macro: number): string | null
+	getMacroCatalog(id: string): Record<number, MacroCatalogEntry> | null
 	getMacroStatus(id: string, macro: number): number | null
 	getMacroRunState(
 		id: string,
 	): { macroStatus: Record<number, number>; lastPlayedMacro: number | null; runSeq: number } | null
 	resolveSourceDisplayName(id: string, source: number): string | null
+	getSourceNames(id: string): SourceName[]
 	getAuxSource(id: string, aux: number): number | null
 	getMESource(id: string, address: number): number | null
 	sendMacro(id: string, macro: number): CommandResult

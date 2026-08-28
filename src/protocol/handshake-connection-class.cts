@@ -1782,7 +1782,9 @@ let found = 0;
         if (this.isClosing || this.mainHandshakeStage !== 9) {
             return { success: false, message: 'Not connected.' };
         }
-        const payload = this.buildSetEvent(0x0046, 0x77000000);
+        // Official K-Frame Macro Control Stop-All: normal Stop event with the
+        // all-macros sentinel, including macros paused at a User Wait.
+        const payload = this.buildSetEvent(0x0003, 0x77000000, Buffer.from([0xff, 0xff, 0xff, 0xff]));
         this.sendToFrame(payload, (err) => {
             if (err) {
                 this.emitter.emit('status', 'ERROR', `Error sending macro stop-all: ${err.message}`);
@@ -1928,6 +1930,15 @@ let found = 0;
                 if (err) {
                     this.emitter.emit('status', 'ERROR', `Error sending aux route: ${err.message}`);
                 } else {
+                    const previousSource = this.auxState.get(auxNum) || null;
+                    this.auxState.set(auxNum, sourceNum);
+                    if (previousSource !== sourceNum) {
+                        this.emitter.emit('auxStateChanged', {
+                            auxNum,
+                            previousSource,
+                            currentSource: sourceNum
+                        });
+                    }
                     this.emitter.emit('status', 'AUX_ROUTE_SENT', `Aux ${auxNum} -> Source ${sourceNum} (${transitionType})`);
                 }
             });
@@ -2604,6 +2615,15 @@ let found = 0;
      */
     getSourceName(sourceNum) {
         return this.sourceNames.get(sourceNum) || null;
+    }
+
+    /**
+     * Get every cached source name as a detached, source-number-sorted list.
+     */
+    getSourceNames() {
+        return Array.from(this.sourceNames.entries())
+            .sort(([a], [b]) => a - b)
+            .map(([id, names]) => ({ id, ...names }));
     }
 
     /**

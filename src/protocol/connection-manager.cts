@@ -387,6 +387,12 @@ class ConnectionManager {
         return connection.getSourceName(sourceNum);
     }
 
+    getSourceNames(connectionId) {
+        const connection = this.connections.get(connectionId);
+        if (!connection) return [];
+        return connection.getSourceNames();
+    }
+
     /**
      * Resolve a source number to the best display name (menu > oled > panel > eng)
      * Returns null if no name found - caller should fall back to hardcoded labels
@@ -448,6 +454,7 @@ module.exports = {
     isSourceOnAnyME: (id, sourceNum, excludeAddress) => connectionManager.isSourceOnAnyME(id, sourceNum, excludeAddress),
     subscribeToSourceNames: (id) => connectionManager.subscribeToSourceNames(id),
     getSourceName: (id, sourceNum) => connectionManager.getSourceName(id, sourceNum),
+    getSourceNames: (id) => connectionManager.getSourceNames(id),
     resolveSourceDisplayName: (id, sourceNum) => connectionManager.resolveSourceDisplayName(id, sourceNum),
     getConnectionInfo: (id) => connectionManager.getConnectionInfo(id),
     getAllConnectionsInfo: () => connectionManager.getAllConnectionsInfo(),

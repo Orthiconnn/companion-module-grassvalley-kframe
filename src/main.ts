@@ -6,11 +6,13 @@ import { UpdateActions, type ActionsSchema } from './actions.js'
 import { UpdateFeedbacks, type FeedbacksSchema } from './feedbacks.js'
 import { UpdatePresets } from './presets.js'
 import { protocol, type CommandResult } from './protocol.js'
+import type { DropdownChoice } from '@companion-module/base'
 
 export const SUITES = ['suite1a', 'suite2a', 'suite3a', 'suite4a'] as const
 export type SuiteId = (typeof SUITES)[number]
 export type SuiteState = {
 	status: string
+	connectionPhase?: 'establishing' | 'handshake'
 	frameVersion: string
 	protocolName: string
 	heartbeatFlash: boolean
@@ -44,7 +46,12 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		SUITES.map((id) => [id, { status: 'disconnected', frameVersion: '', protocolName: '', heartbeatFlash: false }]),
 	) as Record<SuiteId, SuiteState>
 	readonly macroButtons = new Map<string, { suite: SuiteId; macro: number }>()
+	readonly auxButtons = new Map<string, { suite: SuiteId; aux: number; source: number }>()
 	readonly suiteButtons = new Map<string, Map<string, SuiteId>>()
+	private sourceRefreshTimer?: NodeJS.Timeout
+	private macroCatalogRefreshTimer?: NodeJS.Timeout
+	private macroFlashTimer?: NodeJS.Timeout
+	macroFlashOn = false
 
 	constructor(internal: unknown) {
 		super(internal)
@@ -54,26 +61,63 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.config = config
 		protocol.initialize(null)
 		protocol.clientEmitter.on('status', this.handleProtocolStatus)
+		protocol.clientEmitter.on('sourceNamesUpdated', this.handleSourceNamesUpdated)
+		protocol.clientEmitter.on('auxStateChanged', this.handleAuxStateChanged)
 
 		this.updateActions() // export actions
 		this.updateFeedbacks() // export feedbacks
 		this.updatePresets() // export Presets
 		this.updateVariableDefinitions() // export variable definitions
 		this.updateRuntimeState()
+		this.macroFlashTimer = setInterval(() => {
+			this.macroFlashOn = !this.macroFlashOn
+			this.checkFeedbacks('macro_button_state')
+		}, 500)
 	}
 	// When module gets deleted
 	async destroy(): Promise<void> {
 		for (const state of Object.values(this.suiteStates)) if (state.timer) clearTimeout(state.timer)
+		if (this.sourceRefreshTimer) clearTimeout(this.sourceRefreshTimer)
+		if (this.macroCatalogRefreshTimer) clearTimeout(this.macroCatalogRefreshTimer)
+		if (this.macroFlashTimer) clearInterval(this.macroFlashTimer)
 		protocol.clientEmitter.off('status', this.handleProtocolStatus)
+		protocol.clientEmitter.off('sourceNamesUpdated', this.handleSourceNamesUpdated)
+		protocol.clientEmitter.off('auxStateChanged', this.handleAuxStateChanged)
 		await Promise.all(SUITES.map(async (id) => protocol.disconnectConnection(this.connectionId(id))))
 	}
 
 	async configUpdated(config: ModuleConfig): Promise<void> {
 		this.config = config
+		if (this.sourceRefreshTimer) {
+			clearTimeout(this.sourceRefreshTimer)
+			this.sourceRefreshTimer = undefined
+		}
+		if (this.macroCatalogRefreshTimer) {
+			clearTimeout(this.macroCatalogRefreshTimer)
+			this.macroCatalogRefreshTimer = undefined
+		}
 		await Promise.all(SUITES.map(async (id) => protocol.disconnectConnection(this.connectionId(id))))
 		for (const id of SUITES)
 			this.suiteStates[id] = { status: 'disconnected', frameVersion: '', protocolName: '', heartbeatFlash: false }
+		this.updateActions()
+		this.updatePresets()
 		this.updateRuntimeState()
+	}
+
+	private handleSourceNamesUpdated = (connectionId: string): void => {
+		if (!SUITES.some((suite) => this.connectionId(suite) === connectionId)) return
+		if (this.sourceRefreshTimer) clearTimeout(this.sourceRefreshTimer)
+		this.sourceRefreshTimer = setTimeout(() => {
+			this.sourceRefreshTimer = undefined
+			this.updateActions()
+			this.updatePresets()
+			this.checkFeedbacks('aux_button_state')
+		}, 100)
+	}
+
+	private handleAuxStateChanged = (connectionId: string): void => {
+		if (!SUITES.some((suite) => this.connectionId(suite) === connectionId)) return
+		this.checkFeedbacks('aux_button_state')
 	}
 
 	private handleProtocolStatus = (connectionId: string, type: string, message: unknown): void => {
@@ -82,6 +126,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		const state = this.suiteStates[id]
 		if (type === 'CONNECTED') {
 			state.status = 'connected'
+			state.connectionPhase = undefined
 			const protocolId = this.connectionId(id)
 			const info = protocol.getConnectionInfo(protocolId)
 			state.frameVersion = info?.frameVersion ?? ''
@@ -97,6 +142,18 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 				state.heartbeatFlash = false
 				this.checkFeedbacks('connection_state')
 			}, 300)
+		} else if (type === 'MACRO_CATALOG_READY') {
+			this.updateActions()
+			this.updatePresets()
+			this.checkFeedbacks('macro_button_state')
+			// Companion can have an action editor open while the bulk catalog is
+			// settling. Publish the completed choices once more on the next turn so
+			// the editor receives the final named list, not its initial fallback.
+			if (this.macroCatalogRefreshTimer) clearTimeout(this.macroCatalogRefreshTimer)
+			this.macroCatalogRefreshTimer = setTimeout(() => {
+				this.macroCatalogRefreshTimer = undefined
+				this.updateActions()
+			}, 250)
 		} else if (type === 'FRAME_VERSION' && message && typeof message === 'object' && 'version' in message) {
 			state.frameVersion = String(message.version)
 		} else if (['ERROR', 'DISCONNECTED', 'HANDSHAKE_TIMEOUT_ERROR', 'HEARTBEAT_TIMEOUT'].includes(type)) {
@@ -105,6 +162,9 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			this.log('warn', `Suite ${suiteNumber(id)}: ${detail}`)
 		} else if (type === 'CONNECTING' || type === 'HANDSHAKE_COMPLETE') {
 			state.status = 'connecting'
+			const detail = String(message).toLowerCase()
+			state.connectionPhase =
+				type === 'HANDSHAKE_COMPLETE' || /handshake|auth|registration/.test(detail) ? 'handshake' : 'establishing'
 		}
 		this.updateRuntimeState()
 	}
@@ -117,6 +177,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			return
 		}
 		state.status = 'connecting'
+		state.connectionPhase = 'establishing'
 		this.updateRuntimeState()
 		try {
 			const [mainPort, listenerPort] = suitePorts(id)
@@ -159,6 +220,23 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.checkFeedbacks('macro_button_state')
 	}
 
+	trackAuxButton(controlId: string, suite: unknown, aux: unknown, source: unknown): void {
+		const targetSuite = suiteId(suite)
+		this.auxButtons.set(controlId, {
+			suite: targetSuite,
+			aux: Number(aux) || 1,
+			source: Number(source) || 1,
+		})
+		this.trackSuiteButton(controlId, 'aux_route', targetSuite)
+		this.checkFeedbacks('aux_button_state')
+	}
+
+	untrackAuxButton(controlId: string): void {
+		this.auxButtons.delete(controlId)
+		this.untrackSuiteButton(controlId, 'aux_route')
+		this.checkFeedbacks('aux_button_state')
+	}
+
 	trackSuiteButton(controlId: string, actionId: string, suite: unknown): void {
 		const actions = this.suiteButtons.get(controlId) ?? new Map<string, SuiteId>()
 		actions.set(actionId, suiteId(suite))
@@ -197,7 +275,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 				}),
 			),
 		)
-		this.checkFeedbacks('connected', 'connection_state', 'macro_active', 'macro_button_state')
+		this.checkFeedbacks('connected', 'connection_state', 'macro_active', 'macro_button_state', 'aux_button_state')
 	}
 
 	get protocol(): typeof protocol {
@@ -206,6 +284,49 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 
 	connectionId(id: SuiteId): string {
 		return `${this.id}:${id}`
+	}
+
+	sourceChoices(maximum: number): DropdownChoice<number>[] {
+		const labels = new Map<number, string>()
+		// Action definitions are module-wide, so the lowest-numbered connected suite
+		// deterministically supplies the label when suites disagree about a source name.
+		for (const suite of SUITES) {
+			for (const source of protocol.getSourceNames(this.connectionId(suite))) {
+				if (source.id < 1 || source.id > maximum || labels.has(source.id)) continue
+				const name = source.menu || source.oled || source.panel || source.eng || source.short
+				if (name) labels.set(source.id, name)
+			}
+		}
+		if (!labels.has(1)) labels.set(1, 'Source 1')
+		return [...labels.entries()]
+			.sort(([a], [b]) => a - b)
+			.map(([id, label]) => ({ id, label: label === `Source ${id}` ? label : `${id} — ${label}` }))
+	}
+
+	sourceDisplayName(source: number): string {
+		const choice = this.sourceChoices(850).find((entry) => entry.id === source)
+		return choice?.label ?? `Source ${source}`
+	}
+
+	macroChoices(): DropdownChoice<number>[] {
+		const labels = new Map<number, string>()
+		for (const suite of SUITES) {
+			const catalog = protocol.getMacroCatalog(this.connectionId(suite)) ?? {}
+			for (const [rawNumber, entry] of Object.entries(catalog)) {
+				const macro = Number(rawNumber)
+				if (macro < 1 || macro > 999 || labels.has(macro)) continue
+				const name = entry.oled || entry.panel || entry.comment
+				if (name) labels.set(macro, name)
+			}
+		}
+		if (!labels.has(1)) labels.set(1, 'Macro 1')
+		return [...labels.entries()]
+			.sort(([a], [b]) => a - b)
+			.map(([id, label]) => ({ id, label: label === `Macro ${id}` ? label : `${id} — ${label}` }))
+	}
+
+	macroDisplayName(suite: SuiteId, macro: number): string {
+		return protocol.getMacroName(this.connectionId(suite), macro) || `Macro ${macro}`
 	}
 
 	// Return config fields for web config

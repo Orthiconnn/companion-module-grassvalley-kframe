@@ -54,6 +54,9 @@ function resultOrThrow(result: { success: boolean; message: string }): void {
 
 export function UpdateActions(self: ModuleInstance): void {
 	const p = self.protocol
+	const auxSourceChoices = self.sourceChoices(850)
+	const crosspointSourceChoices = self.sourceChoices(809)
+	const macroChoices = self.macroChoices()
 	const suiteOption = {
 		id: 'suite' as const,
 		type: 'dropdown' as const,
@@ -101,7 +104,19 @@ export function UpdateActions(self: ModuleInstance): void {
 		},
 		macro_play: {
 			name: 'Macro: Play / Continue',
-			options: [suiteOption, { id: 'value', type: 'number', label: 'Macro', default: 1, min: 1, max: 999 }],
+			options: [
+				suiteOption,
+				{
+					id: 'value',
+					type: 'dropdown',
+					label: 'Macro',
+					default: 1,
+					choices: macroChoices,
+					allowCustom: true,
+					regex: '^([1-9]|[1-9][0-9]|[1-9][0-9]{2})$',
+					minChoicesForSearch: 8,
+				},
+			],
 			optionsToMonitorForSubscribe: ['suite', 'value'],
 			subscribe: (action) => self.trackMacroButton(action.controlId, action.options.suite, action.options.value),
 			unsubscribe: (action) => self.untrackMacroButton(action.controlId),
@@ -110,7 +125,19 @@ export function UpdateActions(self: ModuleInstance): void {
 		macro_stop: {
 			name: 'Macro: Stop',
 			...suiteSubscription,
-			options: [suiteOption, { id: 'value', type: 'number', label: 'Macro', default: 1, min: 1, max: 999 }],
+			options: [
+				suiteOption,
+				{
+					id: 'value',
+					type: 'dropdown',
+					label: 'Macro',
+					default: 1,
+					choices: macroChoices,
+					allowCustom: true,
+					regex: '^([1-9]|[1-9][0-9]|[1-9][0-9]{2})$',
+					minChoicesForSearch: 8,
+				},
+			],
 			callback: (e) => resultOrThrow(p.sendMacroStop(id(e), Number(e.options.value))),
 		},
 		macro_stop_all: {
@@ -121,11 +148,23 @@ export function UpdateActions(self: ModuleInstance): void {
 		},
 		aux_route: {
 			name: 'AUX: Route Source',
-			...suiteSubscription,
+			optionsToMonitorForSubscribe: ['suite', 'aux', 'source'],
+			subscribe: (action) =>
+				self.trackAuxButton(action.controlId, action.options.suite, action.options.aux, action.options.source),
+			unsubscribe: (action) => self.untrackAuxButton(action.controlId),
 			options: [
 				suiteOption,
 				{ id: 'aux', type: 'number', label: 'AUX', default: 1, min: 1, max: 96 },
-				{ id: 'source', type: 'number', label: 'Source', default: 1, min: 1, max: 850 },
+				{
+					id: 'source',
+					type: 'dropdown',
+					label: 'Source',
+					default: 1,
+					choices: auxSourceChoices,
+					allowCustom: true,
+					regex: '^([1-9]|[1-9][0-9]|[1-7][0-9]{2}|8[0-4][0-9]|850)$',
+					minChoicesForSearch: 8,
+				},
 				{
 					id: 'transition',
 					type: 'dropdown',
@@ -149,7 +188,16 @@ export function UpdateActions(self: ModuleInstance): void {
 			options: [
 				suiteOption,
 				{ id: 'target', type: 'dropdown', label: 'Bus / Keyer', default: 'PGM_A', choices: crosspointChoices },
-				{ id: 'source', type: 'number', label: 'Source', default: 1, min: 1, max: 809 },
+				{
+					id: 'source',
+					type: 'dropdown',
+					label: 'Source',
+					default: 1,
+					choices: crosspointSourceChoices,
+					allowCustom: true,
+					regex: '^([1-9]|[1-9][0-9]|[1-7][0-9]{2}|80[0-9])$',
+					minChoicesForSearch: 8,
+				},
 			],
 			callback: (e) => {
 				const [me, bus] = String(e.options.target).split('_')

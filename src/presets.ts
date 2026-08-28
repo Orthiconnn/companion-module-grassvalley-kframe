@@ -6,6 +6,9 @@ import { SUITE_BADGES } from './badges.js'
 export function UpdatePresets(self: ModuleInstance): void {
 	const suiteBadgeStyle = { png64: SUITE_BADGES[1], pngalignment: 'left:bottom' as const }
 	const suiteBadgeFeedback = () => ({ feedbackId: 'suite_badge' as const, options: {} })
+	const macroFeedback = () => ({ feedbackId: 'macro_button_state' as const, options: { automaticLabel: true } })
+	const auxFeedback = () => ({ feedbackId: 'aux_button_state' as const, options: { automaticLabel: true } })
+	const source1Label = self.sourceDisplayName(1)
 	const busFamilies = [
 		{ id: 'me1', target: 'ME1', label: 'ME1', mappingBus: 'me1', bright: 0x2e9d55, dark: 0x1d6538, text: 0xffffff },
 		{ id: 'me2', target: 'ME2', label: 'ME2', mappingBus: 'me2', bright: 0xffd21f, dark: 0xb08c00, text: 0x000000 },
@@ -146,15 +149,15 @@ export function UpdatePresets(self: ModuleInstance): void {
 		'connection-suite1': {
 			type: 'simple',
 			name: 'Suite 1 Connect / Disconnect',
-			style: { text: 'Suite 1\nNot\nConnected', size: 10, color: 0xffffff, bgcolor: 0xa80000 },
+			style: { text: 'Suite 1\nDisconnected', size: 10, color: 0xffffff, bgcolor: 0xa80000 },
 			steps: [{ down: [{ actionId: 'connection_toggle', options: { suite: 'suite1a' } }], up: [] }],
 			feedbacks: [{ feedbackId: 'connection_state', options: { suite: 'suite1a' } }],
 		},
 		macro1: {
 			type: 'simple',
-			name: 'Macro 1',
+			name: self.macroDisplayName('suite1a', 1),
 			style: {
-				text: 'Macro\n1',
+				text: self.macroDisplayName('suite1a', 1),
 				size: 10,
 				color: 0xffffff,
 				bgcolor: 0x285b0b,
@@ -162,12 +165,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 				pngalignment: 'left:bottom',
 			},
 			steps: [{ down: [{ actionId: 'macro_play', options: { suite: 'suite1a', value: 1 } }], up: [] }],
-			feedbacks: [
-				{
-					feedbackId: 'macro_button_state',
-					options: { automaticLabel: true },
-				},
-			],
+			feedbacks: [macroFeedback()],
 		},
 		'macro-stop1': {
 			type: 'simple',
@@ -192,15 +190,15 @@ export function UpdatePresets(self: ModuleInstance): void {
 		},
 		'aux1-source1': {
 			type: 'simple',
-			name: 'AUX 1 Source 1',
-			style: { text: 'AUX 1\nSRC 1', size: 10, color: 0xffffff, bgcolor: 0x5c005c, ...suiteBadgeStyle },
+			name: `AUX 1 ${source1Label}`,
+			style: { text: `AUX 1\n${source1Label}`, size: 10, color: 0xffffff, bgcolor: 0x5c005c, ...suiteBadgeStyle },
 			steps: [
 				{
 					down: [{ actionId: 'aux_route', options: { suite: 'suite1a', aux: 1, source: 1, transition: 'cut' } }],
 					up: [],
 				},
 			],
-			feedbacks: [suiteBadgeFeedback()],
+			feedbacks: [auxFeedback()],
 		},
 		'panel-memory1': {
 			type: 'simple',
@@ -250,17 +248,18 @@ export function UpdatePresets(self: ModuleInstance): void {
 		presets[`connection-suite${suite}`] = {
 			type: 'simple',
 			name: `Suite ${suite} Connect / Disconnect`,
-			style: { text: `Suite ${suite}\nNot\nConnected`, size: 10, color: 0xffffff, bgcolor: 0xa80000 },
+			style: { text: `Suite ${suite}\nDisconnected`, size: 10, color: 0xffffff, bgcolor: 0xa80000 },
 			steps: [{ down: [{ actionId: 'connection_toggle', options: { suite: id } }], up: [] }],
 			feedbacks: [{ feedbackId: 'connection_state', options: { suite: id } }],
 		}
 	}
 	for (let macro = 2; macro <= 8; macro++) {
+		const macroName = self.macroDisplayName('suite1a', macro)
 		presets[`macro${macro}`] = {
 			type: 'simple',
-			name: `Macro ${macro}`,
+			name: macroName,
 			style: {
-				text: `Macro\n${macro}`,
+				text: macroName,
 				size: 10,
 				color: 0xffffff,
 				bgcolor: 0x285b0b,
@@ -268,33 +267,28 @@ export function UpdatePresets(self: ModuleInstance): void {
 				pngalignment: 'left:bottom',
 			},
 			steps: [{ down: [{ actionId: 'macro_play', options: { suite: 'suite1a', value: macro } }], up: [] }],
-			feedbacks: [
-				{
-					feedbackId: 'macro_button_state',
-					options: { automaticLabel: true },
-				},
-			],
+			feedbacks: [macroFeedback()],
 		}
 	}
 	for (const aux of [2, 3, 4] as const) {
 		const source = 1
 		presets[`aux${aux}-source${source}`] = {
 			type: 'simple',
-			name: `AUX ${aux} Source ${source}`,
-			style: { text: `Aux:${aux}\nSrc:${source}`, size: 10, color: 0xffffff, bgcolor: 0x5c005c, ...suiteBadgeStyle },
+			name: `AUX ${aux} ${source1Label}`,
+			style: { text: `AUX ${aux}\n${source1Label}`, size: 10, color: 0xffffff, bgcolor: 0x5c005c, ...suiteBadgeStyle },
 			steps: [
 				{ down: [{ actionId: 'aux_route', options: { suite: 'suite1a', aux, source, transition: 'cut' } }], up: [] },
 			],
-			feedbacks: [suiteBadgeFeedback()],
+			feedbacks: [auxFeedback()],
 		}
 	}
 	for (const family of busFamilies) {
 		for (const side of ['A', 'B'] as const) {
 			presets[`crosspoint-${family.id}-${side.toLowerCase()}-source1`] = {
 				type: 'simple',
-				name: `${family.label} ${side} Source 1`,
+				name: `${family.label} ${side} ${source1Label}`,
 				style: {
-					text: `${family.label} ${side}\nSRC 1`,
+					text: `${family.label} ${side}\n${source1Label}`,
 					size: 10,
 					color: family.text,
 					bgcolor: side === 'A' ? family.bright : family.dark,

@@ -8,6 +8,7 @@ export type FeedbacksSchema = {
 	connection_state: { type: 'advanced'; options: SuiteOptions }
 	macro_active: { type: 'boolean'; options: SuiteOptions & { macro: number } }
 	macro_button_state: { type: 'advanced'; options: { automaticLabel: boolean } }
+	aux_button_state: { type: 'advanced'; options: { automaticLabel: boolean } }
 	suite_badge: { type: 'advanced'; options: Record<string, never> }
 }
 
@@ -49,14 +50,14 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				}
 				if (state.status === 'connecting')
 					return {
-						text: `Suite ${suiteNumber(id)}\nHandshake\nUDP:${mainPort}\n○`,
+						text: `Suite ${suiteNumber(id)}\nConnecting\n${state.connectionPhase === 'handshake' ? 'Handshake' : 'Establishing'}`,
 						bgcolor: 0xb88600,
 						color: 0xffffff,
 						size: 10,
 						alignment: 'center:center',
 					}
 				return {
-					text: `Suite ${suiteNumber(id)}\nDisconnected\nUDP:${mainPort}\n○`,
+					text: `Suite ${suiteNumber(id)}\nDisconnected`,
 					bgcolor: 0xa80000,
 					color: 0xffffff,
 					size: 10,
@@ -85,26 +86,69 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 			},
 		},
 		macro_button_state: {
-			name: 'Macro button label, suite badge, and active state',
+			name: 'Macro button name, suite badge, and active state',
 			type: 'advanced',
 			options: [
 				{
 					id: 'automaticLabel',
 					type: 'checkbox',
-					label: 'Automatically show Macro number',
+					label: 'Automatically show frame Macro name',
 					default: true,
 				},
 			],
 			callback: (feedback) => {
 				const assignment = self.macroButtons.get(feedback.controlId)
 				if (!assignment) return {}
-				const status = self.protocol.getMacroStatus(self.connectionId(assignment.suite), assignment.macro)
+				const connectionId = self.connectionId(assignment.suite)
+				const status = self.protocol.getMacroStatus(connectionId, assignment.macro)
+				const runState = self.protocol.getMacroRunState(connectionId)
+				const paused = status === 7
+				const playing = status !== null && status !== 0 && !paused
+				const lastPlayed = !playing && !paused && runState?.lastPlayedMacro === assignment.macro
+				const macroName = self.macroDisplayName(assignment.suite, assignment.macro)
+				const bgcolor = paused
+					? self.macroFlashOn
+						? 0x8ee68e
+						: 0x285b0b
+					: playing
+						? 0xffa500
+						: lastPlayed
+							? 0x66cc66
+							: 0x285b0b
 				return {
-					...(feedback.options.automaticLabel ? { text: `Macro\n${assignment.macro}` } : {}),
+					...(feedback.options.automaticLabel ? { text: macroName } : {}),
 					png64: SUITE_BADGES[suiteNumber(assignment.suite)],
 					pngalignment: 'left:bottom',
-					bgcolor: status !== null && status !== 0 ? 0xffa500 : 0x285b0b,
-					color: status !== null && status !== 0 ? 0x000000 : 0xffffff,
+					bgcolor,
+					color: paused ? (self.macroFlashOn ? 0x000000 : 0xffffff) : playing || lastPlayed ? 0x000000 : 0xffffff,
+					size: 10,
+				}
+			},
+		},
+		aux_button_state: {
+			name: 'AUX source name, suite badge, and online state',
+			type: 'advanced',
+			options: [
+				{
+					id: 'automaticLabel',
+					type: 'checkbox',
+					label: 'Automatically show frame Source name and number',
+					default: true,
+				},
+			],
+			callback: (feedback) => {
+				const assignment = self.auxButtons.get(feedback.controlId)
+				if (!assignment) return {}
+				const connectionId = self.connectionId(assignment.suite)
+				const sourceName = self.protocol.resolveSourceDisplayName(connectionId, assignment.source)
+				const online = self.protocol.getAuxSource(connectionId, assignment.aux) === assignment.source
+				const sourceLabel = sourceName ? `${assignment.source} — ${sourceName}` : `Source ${assignment.source}`
+				return {
+					...(feedback.options.automaticLabel ? { text: `AUX ${assignment.aux}\n${sourceLabel}` } : {}),
+					png64: SUITE_BADGES[suiteNumber(assignment.suite)],
+					pngalignment: 'left:bottom',
+					bgcolor: online ? 0xb57edc : 0x5c005c,
+					color: online ? 0x000000 : 0xffffff,
 					size: 10,
 				}
 			},
