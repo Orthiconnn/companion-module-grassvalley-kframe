@@ -24,13 +24,13 @@ const escapeXml = (value: string): string =>
  */
 export const labeledButtonSvg = (suite: number, heading: string, source: string, color: number): string => {
 	const textColor = `#${color.toString(16).padStart(6, '0')}`
-	const sourceSize = Math.max(24, Math.min(52, Math.floor(500 / Math.max(source.length, 1))))
+	const sourceSize = Math.max(26, Math.min(60, Math.floor(580 / Math.max(source.length, 1))))
 	const sourceWidthLimit = source.length > 20 ? ' textLength="300" lengthAdjust="spacingAndGlyphs"' : ''
 	return Buffer.from(
 		`
 <svg xmlns="http://www.w3.org/2000/svg" width="360" height="360" viewBox="0 0 360 360">
 	<g fill="${textColor}" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="500">
-		<text x="180" y="54" font-size="48" dominant-baseline="middle">${escapeXml(heading)}</text>
+		<text x="180" y="54" font-size="58" dominant-baseline="middle">${escapeXml(heading)}</text>
 		<text x="180" y="190" font-size="${sourceSize}" dominant-baseline="middle"${sourceWidthLimit}>${escapeXml(source)}</text>
 	</g>
 	<g transform="translate(24 -24)">

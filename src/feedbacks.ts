@@ -150,7 +150,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					png64: feedback.options.automaticLabel
 						? labeledButtonSvg(suiteNumber(assignment.suite), `AUX ${assignment.aux}`, sourceLabel, color)
 						: SUITE_BADGES[suiteNumber(assignment.suite)],
-					pngalignment: 'left:bottom',
+					pngalignment: feedback.options.automaticLabel ? 'center:bottom' : 'left:bottom',
 					bgcolor: online ? 0xb57edc : 0x5c005c,
 					color,
 					size: 10,
@@ -196,7 +196,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					png64: feedback.options.automaticLabel
 						? labeledButtonSvg(suiteNumber(assignment.suite), busLabel, sourceLabel, color)
 						: SUITE_BADGES[suiteNumber(assignment.suite)],
-					pngalignment: 'left:bottom',
+					pngalignment: feedback.options.automaticLabel ? 'center:bottom' : 'left:bottom',
 					bgcolor: online ? 0xff0000 : bus === 'A' ? base.bright : base.dark,
 					color,
 					size: 10,
