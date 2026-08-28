@@ -50,25 +50,28 @@ export const timelineProgressSvg = (
 ): string => {
 	const progress = Math.max(0, Math.min(1, duration > 0 ? cursorTime / duration : 0))
 	const dotX = 48 + progress * 264
-	const pulseStep = ((phase % 8) + 8) % 8
-	const dotRadius = paused ? 13 + 3 * Math.sin((pulseStep * Math.PI) / 4) : 13
+	const trackY = 104
+	const pulseStep = ((phase % 12) + 12) % 12
+	const dotRadius = paused ? 13 + 3 * Math.sin((pulseStep * Math.PI) / 6) : 13
 	const rings = paused
-		? [0, 3, 6]
+		? [0, 6]
 				.map((offset) => {
-					const step = (pulseStep + offset) % 8
-					const radius = 20 + step * 5
-					const opacity = Math.max(0, 0.75 * (1 - step / 8))
-					return `<circle cx="${dotX.toFixed(2)}" cy="238" r="${radius}" fill="none" stroke="#7ffcff" stroke-width="5" opacity="${opacity.toFixed(2)}"/>`
+					const step = (pulseStep + offset) % 12
+					const radius = 20 + step * 3.5
+					const opacity = Math.max(0, 0.72 * (1 - step / 12))
+					return `<circle cx="${dotX.toFixed(2)}" cy="${trackY}" r="${radius.toFixed(2)}" fill="none" stroke="#9a3f00" stroke-width="5" opacity="${opacity.toFixed(2)}"/>`
 				})
 				.join('')
 		: ''
+	const dotFill = paused ? '#ff8c00' : '#ffffff'
+	const dotStroke = paused ? '#b84a00' : '#00cfd5'
 	return Buffer.from(
 		`
 <svg xmlns="http://www.w3.org/2000/svg" width="360" height="360" viewBox="0 0 360 360">
-	<line x1="48" y1="238" x2="312" y2="238" stroke="#18383d" stroke-width="20" stroke-linecap="round"/>
-	<line x1="48" y1="238" x2="${dotX.toFixed(2)}" y2="238" stroke="#7ffcff" stroke-width="12" stroke-linecap="round"/>
+	<line x1="48" y1="${trackY}" x2="312" y2="${trackY}" stroke="#18383d" stroke-width="20" stroke-linecap="round"/>
+	<line x1="48" y1="${trackY}" x2="${dotX.toFixed(2)}" y2="${trackY}" stroke="#7ffcff" stroke-width="12" stroke-linecap="round"/>
 	${rings}
-	<circle cx="${dotX.toFixed(2)}" cy="238" r="${dotRadius.toFixed(2)}" fill="#ffffff" stroke="#00cfd5" stroke-width="6"/>
+	<circle cx="${dotX.toFixed(2)}" cy="${trackY}" r="${dotRadius.toFixed(2)}" fill="${dotFill}" stroke="${dotStroke}" stroke-width="6"/>
 	<g transform="translate(24 -24)">
 		<circle cx="38" cy="322" r="31" fill="#050505" stroke="#00cfd5" stroke-width="6"/>
 		<path d="${SUITE_NUMBER_PATHS[suite]}" fill="none" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
