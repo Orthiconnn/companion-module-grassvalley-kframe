@@ -51,14 +51,14 @@ export const timelineProgressSvg = (
 	const progress = Math.max(0, Math.min(1, duration > 0 ? cursorTime / duration : 0))
 	const dotX = 48 + progress * 264
 	const trackY = 64
-	const pulseStep = ((phase % 12) + 12) % 12
-	const dotRadius = paused ? 17 + 4 * Math.sin((pulseStep * Math.PI) / 6) : 17
+	const pulseStep = ((phase % 16) + 16) % 16
+	const dotRadius = paused ? 17 + 4 * Math.sin((pulseStep * Math.PI) / 8) : 17
 	const rings = paused
 		? [0]
 				.map((offset) => {
-					const step = (pulseStep + offset) % 12
-					const radius = 20 + step * 3.5
-					const opacity = Math.max(0, 0.72 * (1 - step / 12))
+					const step = (pulseStep + offset) % 16
+					const radius = 20 + step * 2.625
+					const opacity = Math.max(0, 0.72 * (1 - step / 16))
 					return `<circle cx="${dotX.toFixed(2)}" cy="${trackY}" r="${radius.toFixed(2)}" fill="none" stroke="#9a3f00" stroke-width="5" opacity="${opacity.toFixed(2)}"/>`
 				})
 				.join('')

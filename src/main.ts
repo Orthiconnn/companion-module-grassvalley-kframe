@@ -85,9 +85,9 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.timelinePulseTimer = setInterval(() => {
 			const paused = SUITES.some((suite) => (protocol.getTimelineState(this.connectionId(suite))?.pauseState ?? 0) > 0)
 			if (!paused) return
-			this.timelinePulsePhase = (this.timelinePulsePhase + 1) % 12
+			this.timelinePulsePhase = (this.timelinePulsePhase + 1) % 16
 			this.checkFeedbacks('timeline_progress')
-		}, 325)
+		}, 100)
 	}
 	// When module gets deleted
 	async destroy(): Promise<void> {
