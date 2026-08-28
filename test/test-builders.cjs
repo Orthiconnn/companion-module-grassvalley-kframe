@@ -169,11 +169,17 @@ assertEqual(
 	h.buildSetEvent(0x0002, timelineDid, Buffer.alloc(0)),
 	`0004${seqHex}00020005000000080000000f0002000035000001`,
 )
-assertEqual(
-	'run ME1',
-	h.buildSetEvent(0x0002, 0x02000000, Buffer.alloc(0)),
-	`0004${seqHex}00020005000000080000000f0002000002000000`,
-)
+for (const [partition, mode] of [
+	['primary', 0],
+	['secondary', 1],
+	['both', 2],
+]) {
+	assertEqual(
+		`run ME1 ${partition}`,
+		h.buildSetEvent(0x0002, 0x02000000, Buffer.from([mode])),
+		`0004${seqHex}0002000500000009000000100002000002000000${mode.toString(16).padStart(2, '0')}`,
+	)
+}
 const timelineVectors = [
 	['previous', 0x006b, [0x01, 0xff, 0xff], '0000000b00000012006b00003500000101ffff'],
 	['next', 0x006b, [0x01, 0x00, 0x01], '0000000b00000012006b000035000001010001'],

@@ -4,7 +4,7 @@ import type { CompanionPresetDefinitions, CompanionPresetSection } from '@compan
 import { labeledButtonSvg, SUITE_BADGES } from './badges.js'
 
 export function UpdatePresets(self: ModuleInstance): void {
-	const suiteBadgeStyle = { png64: SUITE_BADGES[1], pngalignment: 'left:bottom' as const }
+	const suiteBadgeStyle = { png64: SUITE_BADGES[1], pngalignment: 'center:bottom' as const }
 	const labeledPresetStyle = (heading: string, center: string, color: number, bgcolor: number) => ({
 		text: '',
 		size: 10,
@@ -48,11 +48,11 @@ export function UpdatePresets(self: ModuleInstance): void {
 	const gpiPresetIds = Array.from({ length: 32 }, (_, index) => `gpi${index + 1}`)
 	const timelineRunPresets = [
 		['timeline-run-master', 'MASTER', 'MASTER'],
-		['timeline-run-me1', 'ME1-BOTH', 'ME1'],
-		['timeline-run-me2', 'ME2-BOTH', 'ME2'],
-		['timeline-run-me3', 'ME3-BOTH', 'ME3'],
-		['timeline-run-me4', 'ME4-BOTH', 'ME4'],
-		['timeline-run-pgm', 'PGM-BOTH', 'PGM'],
+		['timeline-run-me1', 'ME1-BOTH', 'ME1 BOTH'],
+		['timeline-run-me2', 'ME2-BOTH', 'ME2 BOTH'],
+		['timeline-run-me3', 'ME3-BOTH', 'ME3 BOTH'],
+		['timeline-run-me4', 'ME4-BOTH', 'ME4 BOTH'],
+		['timeline-run-pgm', 'PGM-BOTH', 'PGM BOTH'],
 	] as const
 	const timelineEditPresets = [
 		['timeline-previous', 'previous', 'PREVIOUS'],
@@ -518,6 +518,12 @@ export function UpdatePresets(self: ModuleInstance): void {
 	}
 	for (const presetId of Object.keys(presets)) {
 		if (!referencedPresets.has(presetId)) throw new Error(`Preset ${presetId} is not reachable from a preset section`)
+	}
+	for (const preset of Object.values(presets)) {
+		if (!preset || preset.type !== 'simple') continue
+		for (const step of preset.steps) {
+			for (const action of [...step.down, ...step.up]) action.options.textSize ??= 100
+		}
 	}
 	self.setPresetDefinitions(structure, presets)
 }

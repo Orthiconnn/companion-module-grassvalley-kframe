@@ -35,4 +35,16 @@ export const UpgradeScripts: CompanionStaticUpgradeScript<ModuleConfig>[] = [
 			updatedFeedbacks: [],
 		}
 	},
+	(
+		_context: CompanionUpgradeContext<ModuleConfig>,
+		props: CompanionStaticUpgradeProps<ModuleConfig, undefined>,
+	): CompanionStaticUpgradeResult<ModuleConfig, undefined> => {
+		const updatedActions = props.actions.filter((action) => action.options.textSize === undefined)
+		for (const action of updatedActions) action.options.textSize = { value: 100, isExpression: false }
+		return {
+			updatedConfig: null,
+			updatedActions,
+			updatedFeedbacks: [],
+		}
+	},
 ]

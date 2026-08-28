@@ -52,6 +52,13 @@ const timelineTargetChoices = [
 	...Object.keys(meIndexes).map((me) => ({ id: me, label: me })),
 	{ id: 'eDPM', label: 'eDPM' },
 ]
+const timelineRunTargetChoices = [
+	{ id: 'MASTER', label: 'Master' },
+	...Object.keys(meIndexes).flatMap((me) =>
+		['PRI', 'SEC', 'BOTH'].map((mode) => ({ id: `${me}-${mode}`, label: `${me} ${mode}` })),
+	),
+	...['PRI', 'SEC', 'BOTH'].map((mode) => ({ id: `eDPM-${mode}`, label: `eDPM ${mode}` })),
+]
 const timelineCommands: Record<string, { eid: number; data: number[] }> = {
 	previous: { eid: 0x006b, data: [0x01, 0xff, 0xff] },
 	next: { eid: 0x006b, data: [0x01, 0x00, 0x01] },
@@ -431,15 +438,18 @@ export function UpdateActions(self: ModuleInstance): void {
 			...suiteSubscription,
 			options: [
 				suiteOption,
-				{ id: 'target', type: 'dropdown', label: 'Target', default: 'MASTER', choices: timelineTargetChoices },
+				{ id: 'target', type: 'dropdown', label: 'Target', default: 'MASTER', choices: timelineRunTargetChoices },
 				textSizeOption,
 			],
 			callback: (e) => {
 				const target = String(e.options.target)
-				const engine = target.split('-')[0]
+				const [engine, partition] = target.split('-')
 				const did = target === 'MASTER' ? 0x35000001 : 0x02000000 + (engine === 'eDPM' ? 10 : meIndexes[engine])
 				if (!Number.isInteger(did)) throw new Error('Invalid timeline RUN target')
-				resultOrThrow(p.sendTimelineEvent(id(e), 0x0002, did, []))
+				const mode = { PRI: 0, SEC: 1, BOTH: 2 }[partition]
+				if (target !== 'MASTER' && mode === undefined) throw new Error('Invalid timeline RUN partition')
+				const data: number[] = target === 'MASTER' ? [] : [mode as number]
+				resultOrThrow(p.sendTimelineEvent(id(e), 0x0002, did, data))
 			},
 		},
 		timeline_edit: {
@@ -550,7 +560,16 @@ export function UpdateActions(self: ModuleInstance): void {
 				},
 				{ id: 'shift', type: 'number', label: 'Shift', default: 1, min: 1, max: 4 },
 				{ id: 'button', type: 'number', label: 'Button', default: 1, min: 1, max: 35 },
-				{ id: 'source', type: 'number', label: 'Source', default: 1, min: 1, max: 809 },
+				{
+					id: 'source',
+					type: 'dropdown',
+					label: 'Source',
+					default: 1,
+					choices: crosspointSourceChoices,
+					allowCustom: true,
+					regex: '^([1-9]|[1-9][0-9]|[1-7][0-9]{2}|80[0-9])$',
+					minChoicesForSearch: 8,
+				},
 				textSizeOption,
 			],
 			callback: (e) =>

@@ -403,7 +403,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				)
 					return {
 						png64: SUITE_BADGES[suiteNumber(suite)],
-						pngalignment: 'left:bottom',
+						pngalignment: 'center:bottom',
 						size: Math.round(10 * actionTextSize),
 					}
 				return {
@@ -430,7 +430,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				if (suites.size !== 1) return { png64: CLEAR_BADGE }
 				const [suite] = suites
 				const size = assignments[0]?.textSize ?? 1
-				return { png64: SUITE_BADGES[suiteNumber(suite)], pngalignment: 'left:bottom', size: Math.round(10 * size) }
+				return { png64: SUITE_BADGES[suiteNumber(suite)], pngalignment: 'center:bottom', size: Math.round(10 * size) }
 			},
 		},
 	})
