@@ -1,6 +1,6 @@
 import type ModuleInstance from './main.js'
 import { suiteId, suiteNumber, suitePorts } from './main.js'
-import { CLEAR_BADGE, SUITE_BADGES } from './badges.js'
+import { CLEAR_BADGE, labeledButtonSvg, SUITE_BADGES } from './badges.js'
 
 type SuiteOptions = { suite?: string }
 export type FeedbacksSchema = {
@@ -144,12 +144,15 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				const sourceName = self.protocol.resolveSourceDisplayName(connectionId, assignment.source)
 				const online = self.protocol.getAuxSource(connectionId, assignment.aux) === assignment.source
 				const sourceLabel = assignment.labelOverride || sourceName || String(assignment.source)
+				const color = online ? 0x000000 : 0xffffff
 				return {
-					...(feedback.options.automaticLabel ? { text: `AUX ${assignment.aux}\n\n${sourceLabel}` } : {}),
-					png64: SUITE_BADGES[suiteNumber(assignment.suite)],
+					...(feedback.options.automaticLabel ? { text: '' } : {}),
+					png64: feedback.options.automaticLabel
+						? labeledButtonSvg(suiteNumber(assignment.suite), `AUX ${assignment.aux}`, sourceLabel, color)
+						: SUITE_BADGES[suiteNumber(assignment.suite)],
 					pngalignment: 'left:bottom',
 					bgcolor: online ? 0xb57edc : 0x5c005c,
-					color: online ? 0x000000 : 0xffffff,
+					color,
 					size: 10,
 					alignment: 'center:center',
 				}
@@ -187,12 +190,15 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				}
 				const base = baseColors[me] ?? { bright: 0x444444, dark: 0x222222, color: 0xffffff }
 				const busLabel = /^K([1-6])$/.test(bus) ? `${me} ${bus}` : `${me}${bus}`
+				const color = online ? 0xffffff : base.color
 				return {
-					...(feedback.options.automaticLabel ? { text: `${busLabel}\n\n${sourceLabel}` } : {}),
-					png64: SUITE_BADGES[suiteNumber(assignment.suite)],
+					...(feedback.options.automaticLabel ? { text: '' } : {}),
+					png64: feedback.options.automaticLabel
+						? labeledButtonSvg(suiteNumber(assignment.suite), busLabel, sourceLabel, color)
+						: SUITE_BADGES[suiteNumber(assignment.suite)],
 					pngalignment: 'left:bottom',
 					bgcolor: online ? 0xff0000 : bus === 'A' ? base.bright : base.dark,
-					color: online ? 0xffffff : base.color,
+					color,
 					size: 10,
 					alignment: 'center:center',
 				}
