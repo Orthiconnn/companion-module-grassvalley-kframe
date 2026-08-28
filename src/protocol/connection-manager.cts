@@ -64,6 +64,10 @@ class ConnectionManager {
             this.emitter.emit('imageStoreStateChanged', connectionId, data);
         });
 
+        connection.emitter.on('transitionTelemetryChanged', (data) => {
+            this.emitter.emit('transitionTelemetryChanged', connectionId, data);
+        });
+
         // Forward source name update events
         connection.emitter.on('sourceNamesUpdated', (data) => {
             this.emitter.emit('sourceNamesUpdated', connectionId, data);
@@ -381,6 +385,18 @@ class ConnectionManager {
         return connection.getImageStoreImage(output);
     }
 
+    subscribeToTransitionTelemetry(connectionId) {
+        const connection = this.connections.get(connectionId);
+        if (!connection) return { success: false, message: `No connection found: ${connectionId}` };
+        return connection.subscribeToTransitionTelemetry();
+    }
+
+    getTransitionTelemetry(connectionId, did) {
+        const connection = this.connections.get(connectionId);
+        if (!connection) return null;
+        return connection.getTransitionTelemetry(did);
+    }
+
     sendTimelineEvent(connectionId, eid, did, data) {
         const connection = this.connections.get(connectionId);
         if (!connection) return { success: false, message: `No connection found: ${connectionId}` };
@@ -492,6 +508,8 @@ module.exports = {
 	 subscribeToMasterTimeline: (id) => connectionManager.subscribeToMasterTimeline(id),
 	 subscribeToImageStore: (id) => connectionManager.subscribeToImageStore(id),
 	 getImageStoreImage: (id, output) => connectionManager.getImageStoreImage(id, output),
+	 subscribeToTransitionTelemetry: (id) => connectionManager.subscribeToTransitionTelemetry(id),
+	 getTransitionTelemetry: (id, did) => connectionManager.getTransitionTelemetry(id, did),
 	 sendTimelineEvent: (id, eid, did, data) => connectionManager.sendTimelineEvent(id, eid, did, data),
     getAllMEState: (id) => connectionManager.getAllMEState(id),
     isSourceOnAnyME: (id, sourceNum, excludeAddress) => connectionManager.isSourceOnAnyME(id, sourceNum, excludeAddress),

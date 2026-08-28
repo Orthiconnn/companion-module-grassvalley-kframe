@@ -31,6 +31,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 	})
 	const gpiFeedback = () => ({ feedbackId: 'gpi_button_state' as const, options: {} })
 	const transitionFeedback = () => ({ feedbackId: 'transition_button_state' as const, options: {} })
+	const ememFeedback = () => ({ feedbackId: 'emem_button_state' as const, options: {} })
 	const source1Label = self.sourceDisplayName(1)
 	const busFamilies = [
 		{ id: 'me1', target: 'ME1', label: 'ME1', mappingBus: 'me1', bright: 0x2e9d55, dark: 0x1d6538, text: 0xffffff },
@@ -231,9 +232,9 @@ export function UpdatePresets(self: ModuleInstance): void {
 		'emem-master-0': {
 			type: 'simple',
 			name: 'Master E-MEM 0',
-			style: { text: 'MASTER\nE-MEM 0', size: 10, color: 0x000000, bgcolor: 0xffffff, ...suiteBadgeStyle },
+			style: labeledPresetStyle('MASTER', '0', 0x000000, 0xffffff),
 			steps: [{ down: [{ actionId: 'emem', options: { suite: 'suite1a', target: 'MASTER', register: 0 } }], up: [] }],
-			feedbacks: [suiteBadgeFeedback()],
+			feedbacks: [ememFeedback()],
 		},
 		'aux1-source1': {
 			type: 'simple',
@@ -459,20 +460,19 @@ export function UpdatePresets(self: ModuleInstance): void {
 		}
 	}
 	for (const family of busFamilies) {
-		for (const [modeId, modeLabel, modeTarget] of [
-			['primary', 'PRI', 'PRI'],
-			['secondary', 'SEC', 'SEC'],
+		for (const [modeId, modeTarget] of [
+			['primary', 'PRI'],
+			['secondary', 'SEC'],
 		] as const) {
 			presets[`emem-${family.id}-${modeId}-0`] = {
 				type: 'simple',
 				name: `${family.label} ${modeId === 'primary' ? 'Primary' : 'Secondary'} E-MEM 0`,
-				style: {
-					text: `${family.label} ${modeLabel}\nE-MEM 0`,
-					size: 10,
-					color: family.text,
-					bgcolor: modeId === 'primary' ? family.bright : family.dark,
-					...suiteBadgeStyle,
-				},
+				style: labeledPresetStyle(
+					`${family.target} ${modeTarget}`,
+					'0',
+					family.text,
+					modeId === 'primary' ? family.bright : family.dark,
+				),
 				steps: [
 					{
 						down: [
@@ -484,7 +484,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 						up: [],
 					},
 				],
-				feedbacks: [suiteBadgeFeedback()],
+				feedbacks: [ememFeedback()],
 			}
 		}
 	}

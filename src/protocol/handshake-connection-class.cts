@@ -81,6 +81,11 @@ class HandshakeConnection {
         this.imageStoreSubscriptionIds = new Map(); // subscriptionId -> output
         this.imageStoreSubscribed = false;
 
+        // Auto-transition telemetry for each ME/PGM primary and secondary partition.
+        this.transitionTelemetry = new Map(); // DID -> { ramp, effectiveRate, active, direction }
+        this.transitionSubscriptionIds = new Map(); // subscriptionId -> { did, pid }
+        this.transitionTelemetrySubscribed = false;
+
         // Source name state (0x020b + 0x0210 subscriptions)
         this.sourceNames = new Map();         // sourceId (number) -> { oled, short, eng, panel, menu }
         this.sourceNamesSubscribed = false;
@@ -1692,6 +1697,9 @@ let found = 0;
         this.imageStoreState.clear();
         this.imageStoreSubscriptionIds.clear();
         this.imageStoreSubscribed = false;
+        this.transitionTelemetry.clear();
+        this.transitionSubscriptionIds.clear();
+        this.transitionTelemetrySubscribed = false;
         this.emitter.emit('status', 'DISCONNECTED', 'Closing connection...');
 
         if (this.heartbeatIntervalId) clearInterval(this.heartbeatIntervalId);
@@ -2511,6 +2519,54 @@ let found = 0;
         return true;
     }
 
+    subscribeToTransitionTelemetry() {
+        if (this.isClosing || this.mainHandshakeStage !== 9) return { success: false, message: 'Not connected.' };
+        if (this.transitionTelemetrySubscribed) return { success: true, message: 'Already subscribed to transition telemetry.' };
+        const meIndexes = [0, 1, 2, 3, 4];
+        const requests = meIndexes.flatMap((index) => [0x03000000 + index, 0x03000010 + index])
+            .flatMap((did) => [4454, 4458, 4459].map((pid) => ({ did, pid })));
+        let index = 0;
+        const sendNext = () => {
+            if (this.isClosing || index >= requests.length) {
+                if (index >= requests.length) this.transitionTelemetrySubscribed = true;
+                return;
+            }
+            const request = requests[index++];
+            const { packet, subId } = this.buildParameterSubscriptionPacket(request.pid, request.did);
+            this.transitionSubscriptionIds.set(subId, request);
+            this.sendToFrame(packet);
+            setTimeout(sendNext, 20);
+        };
+        sendNext();
+        return { success: true, message: 'Transition telemetry subscription in progress.' };
+    }
+
+    parseTransitionTelemetryResponse(msg, pb, payLen) {
+        if (payLen < 21 || pb + payLen > msg.length) return false;
+        const subId = msg.readUInt16BE(pb);
+        const expected = this.transitionSubscriptionIds.get(subId);
+        if (!expected || msg.readUInt16BE(pb + 8) !== expected.pid || msg.readUInt32BE(pb + 12) !== expected.did) return false;
+        const previous = this.transitionTelemetry.get(expected.did) ?? { ramp: 0, effectiveRate: 1, active: false, direction: null };
+        const next = { ...previous };
+        if (expected.pid === 4454) {
+            if (payLen < 24) return false;
+            const ramp = Math.max(0, Math.min(1, msg.readFloatBE(pb + 20)));
+            if (ramp > previous.ramp + 0.0001) next.direction = 'up';
+            else if (ramp < previous.ramp - 0.0001) next.direction = 'down';
+            next.ramp = ramp;
+        } else if (expected.pid === 4458) {
+            if (payLen < 24) return false;
+            next.effectiveRate = Math.max(0, msg.readFloatBE(pb + 20));
+        } else if (expected.pid === 4459) {
+            next.active = payLen >= 24 ? msg.readUInt32BE(pb + 20) !== 0 : msg[pb + 20] !== 0;
+        }
+        if (next.ramp !== previous.ramp || next.effectiveRate !== previous.effectiveRate || next.active !== previous.active || next.direction !== previous.direction) {
+            this.transitionTelemetry.set(expected.did, next);
+            this.emitter.emit('transitionTelemetryChanged', { did: expected.did, ...next });
+        }
+        return true;
+    }
+
     /**
      * Subscribe to AUX bus source selection updates.
      * Sends 96 individual subscription packets (one per AUX bus, 0x00-0x5f).
@@ -2639,6 +2695,8 @@ let found = 0;
                         this.parseTimelineKeyframeResponse(msg, pb, payLen);
                     } else if (this.imageStoreSubscriptionIds.has(firstWord)) {
                         this.parseImageStoreParameterResponse(msg, pb, payLen);
+                    } else if (this.transitionSubscriptionIds.has(firstWord)) {
+                        this.parseTransitionTelemetryResponse(msg, pb, payLen);
                     } else if (firstWord === 0x0210) {
                         // Source definition response — engineering names
                         this.parseSourceDefResponse(msg, pb, payLen);
@@ -2926,6 +2984,11 @@ let found = 0;
 
     getImageStoreImage(output) {
         return this.imageStoreState.get(output) ?? null;
+    }
+
+    getTransitionTelemetry(did) {
+        const state = this.transitionTelemetry.get(did);
+        return state ? { ...state } : null;
     }
 
     /**

@@ -17,6 +17,12 @@ export type TimelineState = {
 	runState: number | null
 	pausePoints: number[]
 }
+export type TransitionTelemetry = {
+	ramp: number
+	effectiveRate: number
+	active: boolean
+	direction: 'up' | 'down' | null
+}
 
 export type ProtocolManager = {
 	initialize(settings: unknown): void
@@ -44,6 +50,7 @@ export type ProtocolManager = {
 	getMESource(id: string, address: number): number | null
 	getTimelineState(id: string): TimelineState | null
 	getImageStoreImage(id: string, output: number): number | null
+	getTransitionTelemetry(id: string, did: number): TransitionTelemetry | null
 	sendMacro(id: string, macro: number): CommandResult
 	sendMacroStop(id: string, macro: number): CommandResult
 	sendMacroStopAll(id: string): CommandResult
@@ -62,6 +69,7 @@ export type ProtocolManager = {
 	subscribeToSourceNames(id: string): CommandResult
 	subscribeToMasterTimeline(id: string): CommandResult
 	subscribeToImageStore(id: string): CommandResult
+	subscribeToTransitionTelemetry(id: string): CommandResult
 	clientEmitter: NodeJS.EventEmitter
 }
 

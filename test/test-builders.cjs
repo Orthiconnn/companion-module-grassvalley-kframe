@@ -247,6 +247,30 @@ h.imageStoreSubscriptionIds.set(imageStoreSubId, 3)
 assertValue('image-store display-image response parsed', h.parseImageStoreParameterResponse(imageStoreIssue, 0, 24), true)
 assertValue('image-store output state', h.getImageStoreImage(3), 1500)
 
+const transitionDid = 0x03000000
+const rampSubId = 0x5303
+const activeSubId = 0x5304
+h.transitionSubscriptionIds.set(rampSubId, { did: transitionDid, pid: 4454 })
+h.transitionSubscriptionIds.set(activeSubId, { did: transitionDid, pid: 4459 })
+const transitionIssue = (subId, pid, size = 24) => {
+	const issue = Buffer.alloc(size)
+	issue.writeUInt16BE(subId, 0)
+	issue.writeUInt16BE(1, 2)
+	issue.writeUInt16BE(3, 4)
+	issue.writeUInt16BE(pid, 8)
+	issue.writeUInt32BE(transitionDid, 12)
+	return issue
+}
+const activeIssue = transitionIssue(activeSubId, 4459, 21)
+activeIssue[20] = 1
+assertValue('auto-transition active response parsed', h.parseTransitionTelemetryResponse(activeIssue, 0, 21), true)
+const rampIssue = transitionIssue(rampSubId, 4454)
+rampIssue.writeFloatBE(0.4, 20)
+assertValue('auto-transition ramp response parsed', h.parseTransitionTelemetryResponse(rampIssue, 0, 24), true)
+assertValue('auto-transition active state', h.getTransitionTelemetry(transitionDid).active, true)
+assertValue('auto-transition ramp state', Math.round(h.getTransitionTelemetry(transitionDid).ramp * 10), 4)
+assertValue('auto-transition direction state', h.getTransitionTelemetry(transitionDid).direction, 'up')
+
 // ─── B1: All 50 crosspoint targets ──────────────────────────
 
 console.log('\nCrosspoint targets (50 entries):')

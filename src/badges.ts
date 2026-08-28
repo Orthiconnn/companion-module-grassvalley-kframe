@@ -22,17 +22,30 @@ const escapeXml = (value: string): string =>
  * so a vector overlay is required to keep the heading at the top while the
  * source remains centered.
  */
-export const labeledButtonSvg = (suite: number, heading: string, source: string, color: number): string => {
+export const labeledButtonSvg = (
+	suite: number,
+	heading: string,
+	source: string,
+	color: number,
+	transition?: { ramp: number; active: boolean },
+	textScale = 1,
+): string => {
 	const textColor = `#${color.toString(16).padStart(6, '0')}`
-	const sourceSize = Math.max(26, Math.min(60, Math.floor(580 / Math.max(source.length, 1))))
+	const scale = Math.max(0.5, Math.min(2, textScale))
+	const headingSize = Math.round(58 * scale)
+	const sourceSize = Math.round(Math.max(26, Math.min(60, Math.floor(580 / Math.max(source.length, 1)))) * scale)
 	const sourceWidthLimit = source.length > 20 ? ' textLength="300" lengthAdjust="spacingAndGlyphs"' : ''
+	const transitionStrip = transition?.active
+		? `<rect x="306" y="${(252 - Math.max(0, Math.min(1, transition.ramp)) * 188).toFixed(2)}" width="34" height="64" rx="3" fill="#98e700" stroke="#315f00" stroke-width="5"/>`
+		: ''
 	return Buffer.from(
 		`
 <svg xmlns="http://www.w3.org/2000/svg" width="360" height="360" viewBox="0 0 360 360">
 	<g fill="${textColor}" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="500">
-		<text x="180" y="54" font-size="58" dominant-baseline="middle">${escapeXml(heading)}</text>
+		<text x="180" y="54" font-size="${headingSize}" dominant-baseline="middle">${escapeXml(heading)}</text>
 		<text x="180" y="190" font-size="${sourceSize}" dominant-baseline="middle"${sourceWidthLimit}>${escapeXml(source)}</text>
 	</g>
+	${transitionStrip}
 	<g transform="translate(24 -24)">
 		<circle cx="38" cy="322" r="31" fill="#050505" stroke="#00cfd5" stroke-width="6"/>
 		<path d="${SUITE_NUMBER_PATHS[suite]}" fill="none" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>

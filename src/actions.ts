@@ -2,7 +2,7 @@ import type ModuleInstance from './main.js'
 import { suiteId } from './main.js'
 import { buildButtonMapping, buildGpi, buildPbusRecall, buildPbusTrigger } from './legacy-actions.js'
 
-type SuiteOption = { suite?: string }
+type SuiteOption = { suite?: string; textSize?: number }
 type NumberOption = { options: SuiteOption & { value: number; labelOverride?: string } }
 type SuiteOnly = { options: SuiteOption }
 
@@ -15,7 +15,7 @@ export type ActionsSchema = {
 	macro_stop_all: SuiteOnly
 	aux_route: { options: SuiteOption & { aux: number; source: number; transition: string; labelOverride?: string } }
 	crosspoint: { options: SuiteOption & { target: string; source: number; labelOverride?: string } }
-	emem: { options: SuiteOption & { target: string; register: number } }
+	emem: { options: SuiteOption & { target: string; register: number; labelOverride?: string } }
 	transition: { options: SuiteOption & { target: string; transition: string; labelOverride?: string } }
 	panel_memory: NumberOption
 	image_store: { options: SuiteOption & { output: number; image: number; labelOverride?: string } }
@@ -80,6 +80,14 @@ export function UpdateActions(self: ModuleInstance): void {
 		default: '',
 		useVariables: true,
 	}
+	const textSizeOption = {
+		id: 'textSize' as const,
+		type: 'number' as const,
+		label: 'Text size (%)',
+		default: 100,
+		min: 50,
+		max: 200,
+	}
 	const suiteOption = {
 		id: 'suite' as const,
 		type: 'dropdown' as const,
@@ -94,29 +102,32 @@ export function UpdateActions(self: ModuleInstance): void {
 	}
 	const id = (e: { options: { suite?: string } }) => self.connectionId(suiteId(e.options.suite))
 	const suiteSubscription: {
-		optionsToMonitorForSubscribe: 'suite'[]
+		optionsToMonitorForSubscribe: ('suite' | 'textSize')[]
 		subscribe: (action: { id: string; controlId: string; options: SuiteOption }) => void
 		unsubscribe: (action: { id: string; controlId: string }) => void
 	} = {
-		optionsToMonitorForSubscribe: ['suite'],
+		optionsToMonitorForSubscribe: ['suite', 'textSize'],
 		subscribe: (action: { id: string; controlId: string; options: SuiteOption }) =>
-			self.trackSuiteButton(action.controlId, action.id, action.options.suite),
+			self.trackSuiteButton(action.controlId, action.id, action.options.suite, action.options.textSize),
 		unsubscribe: (action: { id: string; controlId: string }) => self.untrackSuiteButton(action.controlId, action.id),
 	}
 	self.setActionDefinitions({
 		connect: {
 			name: 'Connection: Connect',
-			options: [suiteOption],
+			...suiteSubscription,
+			options: [suiteOption, textSizeOption],
 			callback: async (e) => self.connectSuite(e.options.suite),
 		},
 		disconnect: {
 			name: 'Connection: Disconnect',
-			options: [suiteOption],
+			...suiteSubscription,
+			options: [suiteOption, textSizeOption],
 			callback: async (e) => self.disconnectSuite(e.options.suite),
 		},
 		connection_toggle: {
 			name: 'Connection: Connect / Disconnect',
-			options: [suiteOption],
+			...suiteSubscription,
+			options: [suiteOption, textSizeOption],
 			callback: async (e) => {
 				const suite = suiteId(e.options.suite),
 					status = self.suiteStates[suite].status
@@ -140,14 +151,16 @@ export function UpdateActions(self: ModuleInstance): void {
 					minChoicesForSearch: 8,
 				},
 				labelOverrideOption,
+				textSizeOption,
 			],
-			optionsToMonitorForSubscribe: ['suite', 'value', 'labelOverride'],
+			optionsToMonitorForSubscribe: ['suite', 'value', 'labelOverride', 'textSize'],
 			subscribe: (action) =>
 				self.trackMacroButton(
 					action.controlId,
 					action.options.suite,
 					action.options.value,
 					action.options.labelOverride,
+					action.options.textSize,
 				),
 			unsubscribe: (action) => self.untrackMacroButton(action.controlId),
 			callback: (e) => resultOrThrow(p.sendMacro(id(e), Number(e.options.value))),
@@ -167,18 +180,19 @@ export function UpdateActions(self: ModuleInstance): void {
 					regex: '^([1-9]|[1-9][0-9]|[1-9][0-9]{2})$',
 					minChoicesForSearch: 8,
 				},
+				textSizeOption,
 			],
 			callback: (e) => resultOrThrow(p.sendMacroStop(id(e), Number(e.options.value))),
 		},
 		macro_stop_all: {
 			name: 'Macro: Stop All',
 			...suiteSubscription,
-			options: [suiteOption],
+			options: [suiteOption, textSizeOption],
 			callback: (e) => resultOrThrow(p.sendMacroStopAll(id(e))),
 		},
 		aux_route: {
 			name: 'AUX: Route Source',
-			optionsToMonitorForSubscribe: ['suite', 'aux', 'source', 'labelOverride'],
+			optionsToMonitorForSubscribe: ['suite', 'aux', 'source', 'labelOverride', 'textSize'],
 			subscribe: (action) =>
 				self.trackAuxButton(
 					action.controlId,
@@ -186,6 +200,7 @@ export function UpdateActions(self: ModuleInstance): void {
 					action.options.aux,
 					action.options.source,
 					action.options.labelOverride,
+					action.options.textSize,
 				),
 			unsubscribe: (action) => self.untrackAuxButton(action.controlId),
 			options: [
@@ -213,6 +228,7 @@ export function UpdateActions(self: ModuleInstance): void {
 					],
 				},
 				labelOverrideOption,
+				textSizeOption,
 			],
 			callback: (e) =>
 				resultOrThrow(
@@ -221,7 +237,7 @@ export function UpdateActions(self: ModuleInstance): void {
 		},
 		crosspoint: {
 			name: 'Crosspoint: Route Source',
-			optionsToMonitorForSubscribe: ['suite', 'target', 'source', 'labelOverride'],
+			optionsToMonitorForSubscribe: ['suite', 'target', 'source', 'labelOverride', 'textSize'],
 			subscribe: (action) =>
 				self.trackCrosspointButton(
 					action.controlId,
@@ -229,6 +245,7 @@ export function UpdateActions(self: ModuleInstance): void {
 					action.options.target,
 					action.options.source,
 					action.options.labelOverride,
+					action.options.textSize,
 				),
 			unsubscribe: (action) => self.untrackCrosspointButton(action.controlId),
 			options: [
@@ -245,6 +262,7 @@ export function UpdateActions(self: ModuleInstance): void {
 					minChoicesForSearch: 8,
 				},
 				labelOverrideOption,
+				textSizeOption,
 			],
 			callback: (e) => {
 				const [me, bus] = String(e.options.target).split('_')
@@ -265,11 +283,23 @@ export function UpdateActions(self: ModuleInstance): void {
 		},
 		emem: {
 			name: 'E-MEM: Recall',
-			...suiteSubscription,
+			optionsToMonitorForSubscribe: ['suite', 'target', 'register', 'labelOverride', 'textSize'],
+			subscribe: (action) =>
+				self.trackEmemButton(
+					action.controlId,
+					action.options.suite,
+					action.options.target,
+					action.options.register,
+					action.options.labelOverride,
+					action.options.textSize,
+				),
+			unsubscribe: (action) => self.untrackEmemButton(action.controlId),
 			options: [
 				suiteOption,
 				{ id: 'target', type: 'dropdown', label: 'Target', default: 'MASTER', choices: ememChoices },
 				{ id: 'register', type: 'number', label: 'Register', default: 0, min: 0, max: 999 },
+				labelOverrideOption,
+				textSizeOption,
 			],
 			callback: (e) => {
 				const target = String(e.options.target),
@@ -298,8 +328,9 @@ export function UpdateActions(self: ModuleInstance): void {
 					],
 				},
 				labelOverrideOption,
+				textSizeOption,
 			],
-			optionsToMonitorForSubscribe: ['suite', 'target', 'transition', 'labelOverride'],
+			optionsToMonitorForSubscribe: ['suite', 'target', 'transition', 'labelOverride', 'textSize'],
 			subscribe: (action) =>
 				self.trackTransitionButton(
 					action.controlId,
@@ -307,6 +338,7 @@ export function UpdateActions(self: ModuleInstance): void {
 					action.options.target,
 					action.options.transition,
 					action.options.labelOverride,
+					action.options.textSize,
 				),
 			unsubscribe: (action) => self.untrackTransitionButton(action.controlId),
 			callback: (e) => {
@@ -332,14 +364,16 @@ export function UpdateActions(self: ModuleInstance): void {
 				suiteOption,
 				{ id: 'value', type: 'number', label: 'Register', default: 1, min: 1, max: 99 },
 				labelOverrideOption,
+				textSizeOption,
 			],
-			optionsToMonitorForSubscribe: ['suite', 'value', 'labelOverride'],
+			optionsToMonitorForSubscribe: ['suite', 'value', 'labelOverride', 'textSize'],
 			subscribe: (action) =>
 				self.trackPanelMemoryButton(
 					action.controlId,
 					action.options.suite,
 					action.options.value,
 					action.options.labelOverride,
+					action.options.textSize,
 				),
 			unsubscribe: (action) => self.untrackPanelMemoryButton(action.controlId),
 			callback: (e) => resultOrThrow(p.sendPanelMem(id(e), Number(e.options.value))),
@@ -352,8 +386,9 @@ export function UpdateActions(self: ModuleInstance): void {
 				{ id: 'output', type: 'number', label: 'Output', default: 1, min: 1, max: 10 },
 				{ id: 'image', type: 'number', label: 'Image', default: 1, min: 1, max: 8999 },
 				labelOverrideOption,
+				textSizeOption,
 			],
-			optionsToMonitorForSubscribe: ['suite', 'output', 'image', 'labelOverride'],
+			optionsToMonitorForSubscribe: ['suite', 'output', 'image', 'labelOverride', 'textSize'],
 			subscribe: (action) =>
 				self.trackImageStoreButton(
 					action.controlId,
@@ -361,6 +396,7 @@ export function UpdateActions(self: ModuleInstance): void {
 					action.options.output,
 					action.options.image,
 					action.options.labelOverride,
+					action.options.textSize,
 				),
 			unsubscribe: (action) => self.untrackImageStoreButton(action.controlId),
 			callback: (e) => resultOrThrow(p.sendImageStore(id(e), Number(e.options.output), Number(e.options.image))),
@@ -368,13 +404,26 @@ export function UpdateActions(self: ModuleInstance): void {
 		image_store_input: {
 			name: 'Image Store: Select Input',
 			...suiteSubscription,
-			options: [suiteOption, { id: 'value', type: 'number', label: 'Input', default: 1, min: 1, max: 850 }],
+			options: [
+				suiteOption,
+				{
+					id: 'value',
+					type: 'dropdown',
+					label: 'Source',
+					default: 1,
+					choices: auxSourceChoices,
+					allowCustom: true,
+					regex: '^([1-9]|[1-9][0-9]|[1-7][0-9]{2}|8[0-4][0-9]|850)$',
+					minChoicesForSearch: 8,
+				},
+				textSizeOption,
+			],
 			callback: (e) => resultOrThrow(p.sendImageStoreInput(id(e), Number(e.options.value))),
 		},
 		raw_cpl: {
 			name: 'Advanced: Send Raw CPL',
 			...suiteSubscription,
-			options: [suiteOption, { id: 'command', type: 'textinput', label: 'Hex command', default: '' }],
+			options: [suiteOption, { id: 'command', type: 'textinput', label: 'Hex command', default: '' }, textSizeOption],
 			callback: (e) => resultOrThrow(p.sendRawCommand(id(e), String(e.options.command))),
 		},
 		run: {
@@ -383,6 +432,7 @@ export function UpdateActions(self: ModuleInstance): void {
 			options: [
 				suiteOption,
 				{ id: 'target', type: 'dropdown', label: 'Target', default: 'MASTER', choices: timelineTargetChoices },
+				textSizeOption,
 			],
 			callback: (e) => {
 				const target = String(e.options.target)
@@ -415,6 +465,7 @@ export function UpdateActions(self: ModuleInstance): void {
 						{ id: 'mod_all_absolute', label: 'Mod All Absolute' },
 					],
 				},
+				textSizeOption,
 			],
 			callback: (e) => {
 				const command = timelineCommands[String(e.options.command)]
@@ -431,10 +482,17 @@ export function UpdateActions(self: ModuleInstance): void {
 				suiteOption,
 				{ id: 'value', type: 'number', label: 'GPI', default: 1, min: 1, max: 40 },
 				labelOverrideOption,
+				textSizeOption,
 			],
-			optionsToMonitorForSubscribe: ['suite', 'value', 'labelOverride'],
+			optionsToMonitorForSubscribe: ['suite', 'value', 'labelOverride', 'textSize'],
 			subscribe: (action) =>
-				self.trackGpiButton(action.controlId, action.options.suite, action.options.value, action.options.labelOverride),
+				self.trackGpiButton(
+					action.controlId,
+					action.options.suite,
+					action.options.value,
+					action.options.labelOverride,
+					action.options.textSize,
+				),
 			unsubscribe: (action) => self.untrackGpiButton(action.controlId),
 			callback: (e) => resultOrThrow(p.sendRawCommand(id(e), buildGpi(Number(e.options.value)))),
 		},
@@ -445,6 +503,7 @@ export function UpdateActions(self: ModuleInstance): void {
 				suiteOption,
 				{ id: 'pbus', type: 'number', label: 'PBUS', default: 1, min: 1, max: 24 },
 				{ id: 'register', type: 'number', label: 'Register', default: 0, min: 0, max: 299 },
+				textSizeOption,
 			],
 			callback: async (e) => {
 				const commands = buildPbusRecall(Number(e.options.pbus), Number(e.options.register))
@@ -460,6 +519,7 @@ export function UpdateActions(self: ModuleInstance): void {
 				suiteOption,
 				{ id: 'pbus', type: 'number', label: 'PBUS', default: 1, min: 1, max: 24 },
 				{ id: 'trigger', type: 'number', label: 'Trigger', default: 0, min: 0, max: 12 },
+				textSizeOption,
 			],
 			callback: async (e) => {
 				const [clear, select, fire] = buildPbusTrigger(Number(e.options.pbus), Number(e.options.trigger))
@@ -491,6 +551,7 @@ export function UpdateActions(self: ModuleInstance): void {
 				{ id: 'shift', type: 'number', label: 'Shift', default: 1, min: 1, max: 4 },
 				{ id: 'button', type: 'number', label: 'Button', default: 1, min: 1, max: 35 },
 				{ id: 'source', type: 'number', label: 'Source', default: 1, min: 1, max: 809 },
+				textSizeOption,
 			],
 			callback: (e) =>
 				resultOrThrow(

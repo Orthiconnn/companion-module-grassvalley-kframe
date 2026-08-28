@@ -29,6 +29,10 @@ export function suitePorts(id: SuiteId): [number, number] {
 	const main = 6130 + suiteNumber(id) * 2
 	return [main, main + 1]
 }
+export function textScale(value: unknown): number {
+	const percent = Number(value)
+	return Math.max(0.5, Math.min(2, Number.isFinite(percent) ? percent / 100 : 1))
+}
 
 export type ModuleSchema = {
 	config: ModuleConfig
@@ -45,27 +49,38 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	readonly suiteStates = Object.fromEntries(
 		SUITES.map((id) => [id, { status: 'disconnected', frameVersion: '', protocolName: '', heartbeatFlash: false }]),
 	) as Record<SuiteId, SuiteState>
-	readonly macroButtons = new Map<string, { suite: SuiteId; macro: number; labelOverride: string }>()
-	readonly auxButtons = new Map<string, { suite: SuiteId; aux: number; source: number; labelOverride: string }>()
+	readonly macroButtons = new Map<string, { suite: SuiteId; macro: number; labelOverride: string; textSize: number }>()
+	readonly auxButtons = new Map<
+		string,
+		{ suite: SuiteId; aux: number; source: number; labelOverride: string; textSize: number }
+	>()
 	readonly crosspointButtons = new Map<
 		string,
-		{ suite: SuiteId; target: string; source: number; labelOverride: string }
+		{ suite: SuiteId; target: string; source: number; labelOverride: string; textSize: number }
 	>()
 	readonly imageStoreButtons = new Map<
 		string,
-		{ suite: SuiteId; output: number; image: number; labelOverride: string }
+		{ suite: SuiteId; output: number; image: number; labelOverride: string; textSize: number }
 	>()
-	readonly panelMemoryButtons = new Map<string, { suite: SuiteId; register: number; labelOverride: string }>()
-	readonly gpiButtons = new Map<string, { suite: SuiteId; gpi: number; labelOverride: string }>()
+	readonly panelMemoryButtons = new Map<
+		string,
+		{ suite: SuiteId; register: number; labelOverride: string; textSize: number }
+	>()
+	readonly gpiButtons = new Map<string, { suite: SuiteId; gpi: number; labelOverride: string; textSize: number }>()
+	readonly ememButtons = new Map<
+		string,
+		{ suite: SuiteId; target: string; register: number; labelOverride: string; textSize: number }
+	>()
 	readonly transitionButtons = new Map<
 		string,
-		{ suite: SuiteId; target: string; transition: string; labelOverride: string }
+		{ suite: SuiteId; target: string; transition: string; labelOverride: string; textSize: number }
 	>()
-	readonly suiteButtons = new Map<string, Map<string, SuiteId>>()
+	readonly suiteButtons = new Map<string, Map<string, { suite: SuiteId; textSize: number }>>()
 	private sourceRefreshTimer?: NodeJS.Timeout
 	private macroCatalogRefreshTimer?: NodeJS.Timeout
 	private macroFlashTimer?: NodeJS.Timeout
 	private timelineRefreshTimer?: NodeJS.Timeout
+	private transitionRefreshTimer?: NodeJS.Timeout
 	private timelinePulseTimer?: NodeJS.Timeout
 	macroFlashOn = false
 	timelinePulsePhase = 0
@@ -83,6 +98,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		protocol.clientEmitter.on('meStateChanged', this.handleMEStateChanged)
 		protocol.clientEmitter.on('timelineStateChanged', this.handleTimelineStateChanged)
 		protocol.clientEmitter.on('imageStoreStateChanged', this.handleImageStoreStateChanged)
+		protocol.clientEmitter.on('transitionTelemetryChanged', this.handleTransitionTelemetryChanged)
 
 		this.updateActions() // export actions
 		this.updateFeedbacks() // export feedbacks
@@ -107,6 +123,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		if (this.macroCatalogRefreshTimer) clearTimeout(this.macroCatalogRefreshTimer)
 		if (this.macroFlashTimer) clearInterval(this.macroFlashTimer)
 		if (this.timelineRefreshTimer) clearTimeout(this.timelineRefreshTimer)
+		if (this.transitionRefreshTimer) clearTimeout(this.transitionRefreshTimer)
 		if (this.timelinePulseTimer) clearInterval(this.timelinePulseTimer)
 		protocol.clientEmitter.off('status', this.handleProtocolStatus)
 		protocol.clientEmitter.off('sourceNamesUpdated', this.handleSourceNamesUpdated)
@@ -114,6 +131,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		protocol.clientEmitter.off('meStateChanged', this.handleMEStateChanged)
 		protocol.clientEmitter.off('timelineStateChanged', this.handleTimelineStateChanged)
 		protocol.clientEmitter.off('imageStoreStateChanged', this.handleImageStoreStateChanged)
+		protocol.clientEmitter.off('transitionTelemetryChanged', this.handleTransitionTelemetryChanged)
 		await Promise.all(SUITES.map(async (id) => protocol.disconnectConnection(this.connectionId(id))))
 	}
 
@@ -130,6 +148,10 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		if (this.timelineRefreshTimer) {
 			clearTimeout(this.timelineRefreshTimer)
 			this.timelineRefreshTimer = undefined
+		}
+		if (this.transitionRefreshTimer) {
+			clearTimeout(this.transitionRefreshTimer)
+			this.transitionRefreshTimer = undefined
 		}
 		await Promise.all(SUITES.map(async (id) => protocol.disconnectConnection(this.connectionId(id))))
 		for (const id of SUITES)
@@ -174,6 +196,15 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.checkFeedbacks('image_store_button_state')
 	}
 
+	private handleTransitionTelemetryChanged = (connectionId: string): void => {
+		if (!SUITES.some((suite) => this.connectionId(suite) === connectionId)) return
+		if (this.transitionRefreshTimer) return
+		this.transitionRefreshTimer = setTimeout(() => {
+			this.transitionRefreshTimer = undefined
+			this.checkFeedbacks('transition_button_state')
+		}, 100)
+	}
+
 	private handleProtocolStatus = (connectionId: string, type: string, message: unknown): void => {
 		const id = SUITES.find((suite) => this.connectionId(suite) === connectionId)
 		if (!id) return
@@ -190,6 +221,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			setTimeout(() => protocol.subscribeToMEBus(protocolId), 400)
 			setTimeout(() => protocol.subscribeToMasterTimeline(protocolId), 600)
 			setTimeout(() => protocol.subscribeToImageStore(protocolId), 800)
+			setTimeout(() => protocol.subscribeToTransitionTelemetry(protocolId), 1000)
 		} else if (type === 'HEARTBEAT_ACK') {
 			state.heartbeatFlash = true
 			this.checkFeedbacks('connection_state')
@@ -265,12 +297,19 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		if (!result.success) this.log('warn', result.message)
 	}
 
-	trackMacroButton(controlId: string, suite: unknown, macro: unknown, labelOverride: unknown = ''): void {
+	trackMacroButton(
+		controlId: string,
+		suite: unknown,
+		macro: unknown,
+		labelOverride: unknown = '',
+		textSize: unknown = 100,
+	): void {
 		const targetSuite = suiteId(suite)
 		this.macroButtons.set(controlId, {
 			suite: targetSuite,
 			macro: Number(macro) || 1,
 			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
+			textSize: textScale(textSize),
 		})
 		this.checkFeedbacks('macro_button_state')
 	}
@@ -280,15 +319,23 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.checkFeedbacks('macro_button_state')
 	}
 
-	trackAuxButton(controlId: string, suite: unknown, aux: unknown, source: unknown, labelOverride: unknown = ''): void {
+	trackAuxButton(
+		controlId: string,
+		suite: unknown,
+		aux: unknown,
+		source: unknown,
+		labelOverride: unknown = '',
+		textSize: unknown = 100,
+	): void {
 		const targetSuite = suiteId(suite)
 		this.auxButtons.set(controlId, {
 			suite: targetSuite,
 			aux: Number(aux) || 1,
 			source: Number(source) || 1,
 			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
+			textSize: textScale(textSize),
 		})
-		this.trackSuiteButton(controlId, 'aux_route', targetSuite)
+		this.trackSuiteButton(controlId, 'aux_route', targetSuite, textSize)
 		this.checkFeedbacks('aux_button_state')
 	}
 
@@ -298,6 +345,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		target: unknown,
 		source: unknown,
 		labelOverride: unknown = '',
+		textSize: unknown = 100,
 	): void {
 		const targetSuite = suiteId(suite)
 		this.crosspointButtons.set(controlId, {
@@ -305,8 +353,9 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			target: String(target),
 			source: Number(source) || 1,
 			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
+			textSize: textScale(textSize),
 		})
-		this.trackSuiteButton(controlId, 'crosspoint', targetSuite)
+		this.trackSuiteButton(controlId, 'crosspoint', targetSuite, textSize)
 		this.checkFeedbacks('crosspoint_button_state')
 	}
 
@@ -328,6 +377,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		output: unknown,
 		image: unknown,
 		labelOverride: unknown = '',
+		textSize: unknown = 100,
 	): void {
 		const targetSuite = suiteId(suite)
 		this.imageStoreButtons.set(controlId, {
@@ -335,8 +385,9 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			output: Number(output) || 1,
 			image: Number(image) || 1,
 			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
+			textSize: textScale(textSize),
 		})
-		this.trackSuiteButton(controlId, 'image_store', targetSuite)
+		this.trackSuiteButton(controlId, 'image_store', targetSuite, textSize)
 		this.checkFeedbacks('image_store_button_state')
 	}
 
@@ -346,14 +397,21 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.checkFeedbacks('image_store_button_state')
 	}
 
-	trackPanelMemoryButton(controlId: string, suite: unknown, register: unknown, labelOverride: unknown = ''): void {
+	trackPanelMemoryButton(
+		controlId: string,
+		suite: unknown,
+		register: unknown,
+		labelOverride: unknown = '',
+		textSize: unknown = 100,
+	): void {
 		const targetSuite = suiteId(suite)
 		this.panelMemoryButtons.set(controlId, {
 			suite: targetSuite,
 			register: Number(register) || 1,
 			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
+			textSize: textScale(textSize),
 		})
-		this.trackSuiteButton(controlId, 'panel_memory', targetSuite)
+		this.trackSuiteButton(controlId, 'panel_memory', targetSuite, textSize)
 		this.checkFeedbacks('panel_memory_button_state')
 	}
 
@@ -363,14 +421,21 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.checkFeedbacks('panel_memory_button_state')
 	}
 
-	trackGpiButton(controlId: string, suite: unknown, gpi: unknown, labelOverride: unknown = ''): void {
+	trackGpiButton(
+		controlId: string,
+		suite: unknown,
+		gpi: unknown,
+		labelOverride: unknown = '',
+		textSize: unknown = 100,
+	): void {
 		const targetSuite = suiteId(suite)
 		this.gpiButtons.set(controlId, {
 			suite: targetSuite,
 			gpi: Number(gpi) || 1,
 			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
+			textSize: textScale(textSize),
 		})
-		this.trackSuiteButton(controlId, 'gpi', targetSuite)
+		this.trackSuiteButton(controlId, 'gpi', targetSuite, textSize)
 		this.checkFeedbacks('gpi_button_state')
 	}
 
@@ -386,6 +451,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		target: unknown,
 		transition: unknown,
 		labelOverride: unknown = '',
+		textSize: unknown = 100,
 	): void {
 		const targetSuite = suiteId(suite)
 		this.transitionButtons.set(controlId, {
@@ -393,8 +459,9 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			target: String(target),
 			transition: String(transition),
 			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
+			textSize: textScale(textSize),
 		})
-		this.trackSuiteButton(controlId, 'transition', targetSuite)
+		this.trackSuiteButton(controlId, 'transition', targetSuite, textSize)
 		this.checkFeedbacks('transition_button_state')
 	}
 
@@ -404,9 +471,35 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.checkFeedbacks('transition_button_state')
 	}
 
-	trackSuiteButton(controlId: string, actionId: string, suite: unknown): void {
-		const actions = this.suiteButtons.get(controlId) ?? new Map<string, SuiteId>()
-		actions.set(actionId, suiteId(suite))
+	trackEmemButton(
+		controlId: string,
+		suite: unknown,
+		target: unknown,
+		register: unknown,
+		labelOverride: unknown = '',
+		textSize: unknown = 100,
+	): void {
+		const targetSuite = suiteId(suite)
+		this.ememButtons.set(controlId, {
+			suite: targetSuite,
+			target: String(target),
+			register: Number(register) || 0,
+			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
+			textSize: textScale(textSize),
+		})
+		this.trackSuiteButton(controlId, 'emem', targetSuite, textSize)
+		this.checkFeedbacks('emem_button_state')
+	}
+
+	untrackEmemButton(controlId: string): void {
+		this.ememButtons.delete(controlId)
+		this.untrackSuiteButton(controlId, 'emem')
+		this.checkFeedbacks('emem_button_state')
+	}
+
+	trackSuiteButton(controlId: string, actionId: string, suite: unknown, textSize: unknown = 100): void {
+		const actions = this.suiteButtons.get(controlId) ?? new Map<string, { suite: SuiteId; textSize: number }>()
+		actions.set(actionId, { suite: suiteId(suite), textSize: textScale(textSize) })
 		this.suiteButtons.set(controlId, actions)
 		this.checkFeedbacks('suite_badge')
 	}
@@ -453,6 +546,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			'panel_memory_button_state',
 			'gpi_button_state',
 			'transition_button_state',
+			'emem_button_state',
 			'timeline_progress',
 		)
 	}

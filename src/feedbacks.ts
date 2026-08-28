@@ -14,6 +14,7 @@ export type FeedbacksSchema = {
 	panel_memory_button_state: { type: 'advanced'; options: { automaticLabel: boolean } }
 	gpi_button_state: { type: 'advanced'; options: Record<string, never> }
 	transition_button_state: { type: 'advanced'; options: Record<string, never> }
+	emem_button_state: { type: 'advanced'; options: Record<string, never> }
 	timeline_progress: { type: 'advanced'; options: SuiteOptions }
 	suite_badge: { type: 'advanced'; options: Record<string, never> }
 }
@@ -40,6 +41,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 			callback: (feedback) => {
 				const id = suiteId(feedback.options.suite),
 					state = self.suiteStates[id]
+				const actionTextSize = [...(self.suiteButtons.get(feedback.controlId)?.values() ?? [])][0]?.textSize ?? 1
 				const [mainPort] = suitePorts(id),
 					heartbeat = state.heartbeatFlash ? '●' : '○'
 				if (state.status === 'connected') {
@@ -50,7 +52,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 						text: `Suite ${suiteNumber(id)}\nConnected\n${protocolName}:${livePort}\n${heartbeat}`,
 						bgcolor: 0x287a0b,
 						color: 0xffffff,
-						size: 10,
+						size: Math.round(10 * actionTextSize),
 						alignment: 'center:center',
 					}
 				}
@@ -59,14 +61,14 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 						text: `Suite ${suiteNumber(id)}\nConnecting\n${state.connectionPhase === 'handshake' ? 'Handshake' : 'Establishing'}`,
 						bgcolor: 0xb88600,
 						color: 0xffffff,
-						size: 10,
+						size: Math.round(10 * actionTextSize),
 						alignment: 'center:center',
 					}
 				return {
 					text: `Suite ${suiteNumber(id)}\nDisconnected`,
 					bgcolor: 0xa80000,
 					color: 0xffffff,
-					size: 10,
+					size: Math.round(10 * actionTextSize),
 					alignment: 'center:center',
 				}
 			},
@@ -127,7 +129,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					pngalignment: 'left:bottom',
 					bgcolor,
 					color: paused ? (self.macroFlashOn ? 0x000000 : 0xffffff) : playing || lastPlayed ? 0x000000 : 0xffffff,
-					size: 10,
+					size: Math.round(10 * assignment.textSize),
 				}
 			},
 		},
@@ -153,12 +155,19 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				return {
 					...(feedback.options.automaticLabel ? { text: '' } : {}),
 					png64: feedback.options.automaticLabel
-						? labeledButtonSvg(suiteNumber(assignment.suite), `AUX ${assignment.aux}`, sourceLabel, color)
+						? labeledButtonSvg(
+								suiteNumber(assignment.suite),
+								`AUX ${assignment.aux}`,
+								sourceLabel,
+								color,
+								undefined,
+								assignment.textSize,
+							)
 						: SUITE_BADGES[suiteNumber(assignment.suite)],
 					pngalignment: feedback.options.automaticLabel ? 'center:bottom' : 'left:bottom',
 					bgcolor: online ? 0xb57edc : 0x5c005c,
 					color,
-					size: 10,
+					size: Math.round(10 * assignment.textSize),
 					alignment: 'center:center',
 				}
 			},
@@ -199,12 +208,19 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				return {
 					...(feedback.options.automaticLabel ? { text: '' } : {}),
 					png64: feedback.options.automaticLabel
-						? labeledButtonSvg(suiteNumber(assignment.suite), busLabel, sourceLabel, color)
+						? labeledButtonSvg(
+								suiteNumber(assignment.suite),
+								busLabel,
+								sourceLabel,
+								color,
+								undefined,
+								assignment.textSize,
+							)
 						: SUITE_BADGES[suiteNumber(assignment.suite)],
 					pngalignment: feedback.options.automaticLabel ? 'center:bottom' : 'left:bottom',
 					bgcolor: online ? 0xff0000 : bus === 'A' ? base.bright : base.dark,
 					color,
-					size: 10,
+					size: Math.round(10 * assignment.textSize),
 					alignment: 'center:center',
 				}
 			},
@@ -224,7 +240,14 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				return {
 					...(feedback.options.automaticLabel ? { text: '' } : {}),
 					png64: feedback.options.automaticLabel
-						? labeledButtonSvg(suiteNumber(assignment.suite), `IS${assignment.output}`, label, 0xffffff)
+						? labeledButtonSvg(
+								suiteNumber(assignment.suite),
+								`IS${assignment.output}`,
+								label,
+								0xffffff,
+								undefined,
+								assignment.textSize,
+							)
 						: SUITE_BADGES[suiteNumber(assignment.suite)],
 					pngalignment: feedback.options.automaticLabel ? 'center:bottom' : 'left:bottom',
 				}
@@ -243,7 +266,14 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				return {
 					...(feedback.options.automaticLabel ? { text: '' } : {}),
 					png64: feedback.options.automaticLabel
-						? labeledButtonSvg(suiteNumber(assignment.suite), 'PNL MEM', label, 0xffffff)
+						? labeledButtonSvg(
+								suiteNumber(assignment.suite),
+								'PNL MEM',
+								label,
+								0xffffff,
+								undefined,
+								assignment.textSize,
+							)
 						: SUITE_BADGES[suiteNumber(assignment.suite)],
 					pngalignment: feedback.options.automaticLabel ? 'center:bottom' : 'left:bottom',
 				}
@@ -260,6 +290,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					text: assignment.labelOverride || `GPI\n${assignment.gpi}`,
 					png64: SUITE_BADGES[suiteNumber(assignment.suite)],
 					pngalignment: 'left:bottom',
+					size: Math.round(10 * assignment.textSize),
 				}
 			},
 		},
@@ -282,12 +313,77 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				}
 				const family = familyColors[me] ?? { bright: 0x444444, dark: 0x222222, text: 0xffffff }
 				const color = family.text
+				const meIndexes: Record<string, number> = { ME1: 0, ME2: 1, ME3: 2, PGM: 3, ME4: 4 }
+				const meIndex = meIndexes[me]
+				const partition = assignment.target.split('_')[1]
+				const primaryDid = meIndex === undefined ? -1 : 0x03000000 + meIndex
+				const secondaryDid = meIndex === undefined ? -1 : 0x03000010 + meIndex
+				const primary =
+					primaryDid < 0 ? null : self.protocol.getTransitionTelemetry(self.connectionId(assignment.suite), primaryDid)
+				const secondary =
+					secondaryDid < 0
+						? null
+						: self.protocol.getTransitionTelemetry(self.connectionId(assignment.suite), secondaryDid)
+				const telemetry =
+					partition === 'SEC' ? secondary : partition === 'BOTH' ? (primary?.active ? primary : secondary) : primary
 				return {
 					text: '',
-					png64: labeledButtonSvg(suiteNumber(assignment.suite), target, assignment.labelOverride || transition, color),
+					png64: labeledButtonSvg(
+						suiteNumber(assignment.suite),
+						target,
+						assignment.labelOverride || transition,
+						color,
+						assignment.transition === 'auto' && telemetry
+							? { ramp: telemetry.ramp, active: telemetry.active }
+							: undefined,
+						assignment.textSize,
+					),
 					pngalignment: 'center:bottom',
 					bgcolor: assignment.transition === 'auto' ? family.bright : family.dark,
 					color,
+				}
+			},
+		},
+		emem_button_state: {
+			name: 'E-MEM delegate, register, and label override',
+			type: 'advanced',
+			options: [],
+			callback: (feedback) => {
+				const assignment = self.ememButtons.get(feedback.controlId)
+				if (!assignment) return {}
+				const heading = assignment.target === 'MASTER' ? 'MASTER' : assignment.target.replace('-', ' ')
+				const me = assignment.target.split('-')[0]
+				const textColors: Record<string, number> = {
+					ME1: 0xffffff,
+					ME2: 0x000000,
+					ME3: 0x000000,
+					ME4: 0xffffff,
+					PGM: 0xffffff,
+					MASTER: 0x000000,
+				}
+				const color = textColors[me] ?? textColors[assignment.target] ?? 0xffffff
+				const backgrounds: Record<string, { bright: number; dark: number }> = {
+					ME1: { bright: 0x2e9d55, dark: 0x1d6538 },
+					ME2: { bright: 0xffd21f, dark: 0xb08c00 },
+					ME3: { bright: 0xff7a18, dark: 0xa84b00 },
+					ME4: { bright: 0x9b59b6, dark: 0x633974 },
+					PGM: { bright: 0xd93636, dark: 0x8d2020 },
+				}
+				const background = backgrounds[me]
+				const secondary = assignment.target.endsWith('-SEC')
+				return {
+					text: '',
+					png64: labeledButtonSvg(
+						suiteNumber(assignment.suite),
+						heading,
+						assignment.labelOverride || String(assignment.register),
+						color,
+						undefined,
+						assignment.textSize,
+					),
+					pngalignment: 'center:bottom',
+					color,
+					bgcolor: assignment.target === 'MASTER' ? 0xffffff : secondary ? background?.dark : background?.bright,
 				}
 			},
 		},
@@ -297,6 +393,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 			options: [suiteOption],
 			callback: (feedback) => {
 				const suite = suiteId(feedback.options.suite)
+				const actionTextSize = [...(self.suiteButtons.get(feedback.controlId)?.values() ?? [])][0]?.textSize ?? 1
 				const state = self.protocol.getTimelineState(self.connectionId(suite))
 				if (
 					state?.duration === null ||
@@ -304,7 +401,11 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					state.duration <= 0 ||
 					state.cursorTime === null
 				)
-					return { png64: SUITE_BADGES[suiteNumber(suite)], pngalignment: 'left:bottom' }
+					return {
+						png64: SUITE_BADGES[suiteNumber(suite)],
+						pngalignment: 'left:bottom',
+						size: Math.round(10 * actionTextSize),
+					}
 				return {
 					png64: timelineProgressSvg(
 						suiteNumber(suite),
@@ -315,6 +416,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 						state.pausePoints,
 					),
 					pngalignment: 'center:bottom',
+					size: Math.round(10 * actionTextSize),
 				}
 			},
 		},
@@ -323,10 +425,12 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 			type: 'advanced',
 			options: [],
 			callback: (feedback) => {
-				const suites = new Set(self.suiteButtons.get(feedback.controlId)?.values() ?? [])
+				const assignments = [...(self.suiteButtons.get(feedback.controlId)?.values() ?? [])]
+				const suites = new Set(assignments.map((assignment) => assignment.suite))
 				if (suites.size !== 1) return { png64: CLEAR_BADGE }
 				const [suite] = suites
-				return { png64: SUITE_BADGES[suiteNumber(suite)], pngalignment: 'left:bottom' }
+				const size = assignments[0]?.textSize ?? 1
+				return { png64: SUITE_BADGES[suiteNumber(suite)], pngalignment: 'left:bottom', size: Math.round(10 * size) }
 			},
 		},
 	})
