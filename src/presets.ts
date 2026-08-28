@@ -16,6 +16,9 @@ export function UpdatePresets(self: ModuleInstance): void {
 	const buttonMappingPresetIds = busFamilies.flatMap((family) =>
 		[1, 2, 3, 4].flatMap((shift) => [1, 2, 3].map((button) => `button-map-${family.id}-shift${shift}-button${button}`)),
 	)
+	const pbusRecallPresetIds = Array.from({ length: 8 }, (_, index) => `pbus-recall${index + 1}`)
+	const pbusTriggerPresetIds = Array.from({ length: 8 }, (_, index) => `pbus-trigger${index + 1}`)
+	const gpiPresetIds = Array.from({ length: 32 }, (_, index) => `gpi${index + 1}`)
 	const structure: CompanionPresetSection[] = [
 		{
 			id: 'connections',
@@ -72,6 +75,8 @@ export function UpdatePresets(self: ModuleInstance): void {
 				'emem-me3-secondary-0',
 				'emem-me4-primary-0',
 				'emem-me4-secondary-0',
+				'emem-pgm-primary-0',
+				'emem-pgm-secondary-0',
 			],
 		},
 		{
@@ -91,29 +96,14 @@ export function UpdatePresets(self: ModuleInstance): void {
 			],
 		},
 		{
-			id: 'external',
-			name: 'PBUS and GPI',
-			definitions: [
-				'pbus-recall1',
-				'pbus-recall2',
-				'pbus-recall3',
-				'pbus-recall4',
-				'pbus-recall5',
-				'pbus-recall6',
-				'pbus-recall7',
-				'pbus-recall8',
-				'pbus-trigger',
-				'gpi1',
-				'gpi2',
-				'gpi3',
-				'gpi4',
-				'gpi5',
-				'gpi6',
-				'gpi7',
-				'gpi8',
-				'gpi9',
-				'gpi10',
-			],
+			id: 'pbus',
+			name: 'PBUS',
+			definitions: [...pbusRecallPresetIds, ...pbusTriggerPresetIds],
+		},
+		{
+			id: 'gpi',
+			name: 'GPI',
+			definitions: gpiPresetIds,
 		},
 		{
 			id: 'image-store',
@@ -247,7 +237,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 			steps: [{ down: [{ actionId: 'pbus_recall', options: { suite: 'suite1a', pbus: 1, register: 0 } }], up: [] }],
 			feedbacks: [suiteBadgeFeedback()],
 		},
-		'pbus-trigger': {
+		'pbus-trigger1': {
 			type: 'simple',
 			name: 'PBUS 1 Trigger 0',
 			style: { text: 'PBUS 1\nTRIGGER 0', size: 10, color: 0x000000, bgcolor: 0xffbf00, ...suiteBadgeStyle },
@@ -361,6 +351,15 @@ export function UpdatePresets(self: ModuleInstance): void {
 			feedbacks: [suiteBadgeFeedback()],
 		}
 	}
+	for (let pbus = 2; pbus <= 8; pbus++) {
+		presets[`pbus-trigger${pbus}`] = {
+			type: 'simple',
+			name: `PBUS ${pbus} Trigger 0`,
+			style: { text: `PBUS ${pbus}\nTRIGGER 0`, size: 10, color: 0x000000, bgcolor: 0xffbf00, ...suiteBadgeStyle },
+			steps: [{ down: [{ actionId: 'pbus_trigger', options: { suite: 'suite1a', pbus, trigger: 0 } }], up: [] }],
+			feedbacks: [suiteBadgeFeedback()],
+		}
+	}
 	for (let output = 2; output <= 10; output++) {
 		presets[`image-store-output${output}-image1`] = {
 			type: 'simple',
@@ -376,7 +375,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 			feedbacks: [suiteBadgeFeedback()],
 		}
 	}
-	for (let gpi = 2; gpi <= 10; gpi++) {
+	for (let gpi = 2; gpi <= 32; gpi++) {
 		presets[`gpi${gpi}`] = {
 			type: 'simple',
 			name: `GPI ${gpi}`,
@@ -435,7 +434,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 			}
 		}
 	}
-	for (const family of busFamilies.slice(0, 4)) {
+	for (const family of busFamilies) {
 		for (const [modeId, modeLabel, modeTarget] of [
 			['primary', 'PRI', 'PRI'],
 			['secondary', 'SEC', 'SEC'],

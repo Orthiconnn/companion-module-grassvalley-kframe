@@ -40,7 +40,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					const protocolName = (state.protocolName || info?.protocol || 'UDP').toUpperCase()
 					const livePort = info?.ports.dynamic || (protocolName === 'TCP' ? 5000 : mainPort)
 					return {
-						text: `\nSuite ${suiteNumber(id)}\nConnected\n${protocolName}:${livePort}\n${state.frameVersion || ' '}\n${heartbeat}`,
+						text: `Suite ${suiteNumber(id)}\nConnected\n${protocolName}:${livePort}\n${heartbeat}`,
 						bgcolor: 0x287a0b,
 						color: 0xffffff,
 						size: 10,
@@ -49,14 +49,14 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				}
 				if (state.status === 'connecting')
 					return {
-						text: `\nSuite ${suiteNumber(id)}\nConnecting\nEstablishing\nHeartbeat\n○`,
+						text: `Suite ${suiteNumber(id)}\nHandshake\nUDP:${mainPort}\n○`,
 						bgcolor: 0xb88600,
 						color: 0xffffff,
 						size: 10,
 						alignment: 'center:center',
 					}
 				return {
-					text: `\nSuite ${suiteNumber(id)}\nNot\nConnected\n \n○`,
+					text: `Suite ${suiteNumber(id)}\nDisconnected\nUDP:${mainPort}\n○`,
 					bgcolor: 0xa80000,
 					color: 0xffffff,
 					size: 10,
