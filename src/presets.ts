@@ -12,6 +12,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 		feedbackId: 'crosspoint_button_state' as const,
 		options: { automaticLabel: true },
 	})
+	const timelineProgressFeedback = () => ({ feedbackId: 'timeline_progress' as const, options: { suite: 'suite1a' } })
 	const source1Label = self.sourceDisplayName(1)
 	const busFamilies = [
 		{ id: 'me1', target: 'ME1', label: 'ME1', mappingBus: 'me1', bright: 0x2e9d55, dark: 0x1d6538, text: 0xffffff },
@@ -492,7 +493,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 			name: `Timeline Run ${label}`,
 			style: { text: `${label}\nRUN`, size: 10, color: 0xffffff, bgcolor: 0x006d77, ...suiteBadgeStyle },
 			steps: [{ down: [{ actionId: 'run', options: { suite: 'suite1a', target } }], up: [] }],
-			feedbacks: [suiteBadgeFeedback()],
+			feedbacks: target === 'MASTER' ? [timelineProgressFeedback()] : [suiteBadgeFeedback()],
 		}
 	}
 	for (const [presetId, command, label] of timelineEditPresets) {

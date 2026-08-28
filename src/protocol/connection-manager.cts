@@ -56,6 +56,10 @@ class ConnectionManager {
             this.emitter.emit('meStateChanged', connectionId, data);
         });
 
+        connection.emitter.on('timelineStateChanged', (data) => {
+            this.emitter.emit('timelineStateChanged', connectionId, data);
+        });
+
         // Forward source name update events
         connection.emitter.on('sourceNamesUpdated', (data) => {
             this.emitter.emit('sourceNamesUpdated', connectionId, data);
@@ -349,6 +353,18 @@ class ConnectionManager {
         return connection.getMESource(address);
     }
 
+    getTimelineState(connectionId) {
+        const connection = this.connections.get(connectionId);
+        if (!connection) return null;
+        return connection.getTimelineState();
+    }
+
+    subscribeToMasterTimeline(connectionId) {
+        const connection = this.connections.get(connectionId);
+        if (!connection) return { success: false, message: `No connection found: ${connectionId}` };
+        return connection.subscribeToMasterTimeline();
+    }
+
     sendTimelineEvent(connectionId, eid, did, data) {
         const connection = this.connections.get(connectionId);
         if (!connection) return { success: false, message: `No connection found: ${connectionId}` };
@@ -456,6 +472,8 @@ module.exports = {
     isSourceOnAnyAux: (id, sourceNum, excludeAux) => connectionManager.isSourceOnAnyAux(id, sourceNum, excludeAux),
     subscribeToMEBus: (id) => connectionManager.subscribeToMEBus(id),
     getMESource: (id, address) => connectionManager.getMESource(id, address),
+	 getTimelineState: (id) => connectionManager.getTimelineState(id),
+	 subscribeToMasterTimeline: (id) => connectionManager.subscribeToMasterTimeline(id),
 	 sendTimelineEvent: (id, eid, did, data) => connectionManager.sendTimelineEvent(id, eid, did, data),
     getAllMEState: (id) => connectionManager.getAllMEState(id),
     isSourceOnAnyME: (id, sourceNum, excludeAddress) => connectionManager.isSourceOnAnyME(id, sourceNum, excludeAddress),

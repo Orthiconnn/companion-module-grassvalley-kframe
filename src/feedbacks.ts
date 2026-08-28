@@ -1,6 +1,6 @@
 import type ModuleInstance from './main.js'
 import { suiteId, suiteNumber, suitePorts } from './main.js'
-import { CLEAR_BADGE, labeledButtonSvg, SUITE_BADGES } from './badges.js'
+import { CLEAR_BADGE, labeledButtonSvg, SUITE_BADGES, timelineProgressSvg } from './badges.js'
 
 type SuiteOptions = { suite?: string }
 export type FeedbacksSchema = {
@@ -10,6 +10,7 @@ export type FeedbacksSchema = {
 	macro_button_state: { type: 'advanced'; options: { automaticLabel: boolean } }
 	aux_button_state: { type: 'advanced'; options: { automaticLabel: boolean } }
 	crosspoint_button_state: { type: 'advanced'; options: { automaticLabel: boolean } }
+	timeline_progress: { type: 'advanced'; options: SuiteOptions }
 	suite_badge: { type: 'advanced'; options: Record<string, never> }
 }
 
@@ -201,6 +202,32 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					color,
 					size: 10,
 					alignment: 'center:center',
+				}
+			},
+		},
+		timeline_progress: {
+			name: 'Master timeline progress and paused pulse',
+			type: 'advanced',
+			options: [suiteOption],
+			callback: (feedback) => {
+				const suite = suiteId(feedback.options.suite)
+				const state = self.protocol.getTimelineState(self.connectionId(suite))
+				if (
+					state?.duration === null ||
+					state?.duration === undefined ||
+					state.duration <= 0 ||
+					state.cursorTime === null
+				)
+					return { png64: SUITE_BADGES[suiteNumber(suite)], pngalignment: 'left:bottom' }
+				return {
+					png64: timelineProgressSvg(
+						suiteNumber(suite),
+						state.cursorTime,
+						state.duration,
+						state.pauseState > 0,
+						self.timelinePulsePhase,
+					),
+					pngalignment: 'center:bottom',
 				}
 			},
 		},

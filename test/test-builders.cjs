@@ -45,6 +45,14 @@ function assertLength(name, buf, len) {
 	}
 }
 
+function assertValue(name, actual, expected) {
+	if (actual === expected) pass++
+	else {
+		console.log(`  FAIL: ${name}: expected ${expected}, got ${actual}`)
+		fail++
+	}
+}
+
 // ─── Existing tests ──────────────────────────────────────────
 
 console.log('Macro Play (EID 0x0002):')
@@ -180,6 +188,28 @@ const timelineVectors = [
 for (const [name, eid, data, tail] of timelineVectors) {
 	assertEqual(name, h.buildSetEvent(eid, timelineDid, Buffer.from(data)), `0004${seqHex}00020005${tail}`)
 }
+
+console.log('Timeline telemetry subscription and parser:')
+h.subscriptionSequence = FIXED_SEQ
+const timelineSubId = 0x5300
+const timelineSubscription = h.buildParameterSubscriptionPacket(5904, 0x35000001, timelineSubId).packet
+assertEqual(
+	'timeline cursor scalar subscription',
+	timelineSubscription,
+	`0004${seqHex}00020008000000240000002e000000000000000000000000000000005300000100030003000000001710000035000001`,
+)
+const timelineIssue = Buffer.alloc(24)
+timelineIssue.writeUInt16BE(timelineSubId, 0)
+timelineIssue.writeUInt16BE(1, 2)
+timelineIssue.writeUInt16BE(3, 4)
+timelineIssue.writeUInt16BE(5904, 8)
+timelineIssue.writeUInt32BE(0x35000001, 12)
+timelineIssue.writeUInt16BE(4, 16)
+timelineIssue.writeUInt16BE(5, 18)
+timelineIssue.writeFloatBE(12.5, 20)
+h.timelineSubscriptionIds.set(timelineSubId, { pid: 5904, key: 'cursorTime' })
+assertValue('timeline cursor response parsed', h.parseTimelineParameterResponse(timelineIssue, 0, 24), true)
+assertValue('timeline cursor float state', h.getTimelineState().cursorTime, 12.5)
 
 // ─── B1: All 50 crosspoint targets ──────────────────────────
 

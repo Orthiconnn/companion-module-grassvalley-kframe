@@ -55,7 +55,10 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	private sourceRefreshTimer?: NodeJS.Timeout
 	private macroCatalogRefreshTimer?: NodeJS.Timeout
 	private macroFlashTimer?: NodeJS.Timeout
+	private timelineRefreshTimer?: NodeJS.Timeout
+	private timelinePulseTimer?: NodeJS.Timeout
 	macroFlashOn = false
+	timelinePulsePhase = 0
 
 	constructor(internal: unknown) {
 		super(internal)
@@ -68,6 +71,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		protocol.clientEmitter.on('sourceNamesUpdated', this.handleSourceNamesUpdated)
 		protocol.clientEmitter.on('auxStateChanged', this.handleAuxStateChanged)
 		protocol.clientEmitter.on('meStateChanged', this.handleMEStateChanged)
+		protocol.clientEmitter.on('timelineStateChanged', this.handleTimelineStateChanged)
 
 		this.updateActions() // export actions
 		this.updateFeedbacks() // export feedbacks
@@ -78,6 +82,12 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			this.macroFlashOn = !this.macroFlashOn
 			this.checkFeedbacks('macro_button_state')
 		}, 500)
+		this.timelinePulseTimer = setInterval(() => {
+			const paused = SUITES.some((suite) => (protocol.getTimelineState(this.connectionId(suite))?.pauseState ?? 0) > 0)
+			if (!paused) return
+			this.timelinePulsePhase = (this.timelinePulsePhase + 1) % 8
+			this.checkFeedbacks('timeline_progress')
+		}, 200)
 	}
 	// When module gets deleted
 	async destroy(): Promise<void> {
@@ -85,10 +95,13 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		if (this.sourceRefreshTimer) clearTimeout(this.sourceRefreshTimer)
 		if (this.macroCatalogRefreshTimer) clearTimeout(this.macroCatalogRefreshTimer)
 		if (this.macroFlashTimer) clearInterval(this.macroFlashTimer)
+		if (this.timelineRefreshTimer) clearTimeout(this.timelineRefreshTimer)
+		if (this.timelinePulseTimer) clearInterval(this.timelinePulseTimer)
 		protocol.clientEmitter.off('status', this.handleProtocolStatus)
 		protocol.clientEmitter.off('sourceNamesUpdated', this.handleSourceNamesUpdated)
 		protocol.clientEmitter.off('auxStateChanged', this.handleAuxStateChanged)
 		protocol.clientEmitter.off('meStateChanged', this.handleMEStateChanged)
+		protocol.clientEmitter.off('timelineStateChanged', this.handleTimelineStateChanged)
 		await Promise.all(SUITES.map(async (id) => protocol.disconnectConnection(this.connectionId(id))))
 	}
 
@@ -101,6 +114,10 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		if (this.macroCatalogRefreshTimer) {
 			clearTimeout(this.macroCatalogRefreshTimer)
 			this.macroCatalogRefreshTimer = undefined
+		}
+		if (this.timelineRefreshTimer) {
+			clearTimeout(this.timelineRefreshTimer)
+			this.timelineRefreshTimer = undefined
 		}
 		await Promise.all(SUITES.map(async (id) => protocol.disconnectConnection(this.connectionId(id))))
 		for (const id of SUITES)
@@ -131,6 +148,15 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.checkFeedbacks('crosspoint_button_state')
 	}
 
+	private handleTimelineStateChanged = (connectionId: string): void => {
+		if (!SUITES.some((suite) => this.connectionId(suite) === connectionId)) return
+		if (this.timelineRefreshTimer) return
+		this.timelineRefreshTimer = setTimeout(() => {
+			this.timelineRefreshTimer = undefined
+			this.checkFeedbacks('timeline_progress')
+		}, 100)
+	}
+
 	private handleProtocolStatus = (connectionId: string, type: string, message: unknown): void => {
 		const id = SUITES.find((suite) => this.connectionId(suite) === connectionId)
 		if (!id) return
@@ -145,6 +171,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			protocol.subscribeToSourceNames(protocolId)
 			setTimeout(() => protocol.subscribeToAuxBus(protocolId), 200)
 			setTimeout(() => protocol.subscribeToMEBus(protocolId), 400)
+			setTimeout(() => protocol.subscribeToMasterTimeline(protocolId), 600)
 		} else if (type === 'HEARTBEAT_ACK') {
 			state.heartbeatFlash = true
 			this.checkFeedbacks('connection_state')
@@ -322,6 +349,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			'macro_button_state',
 			'aux_button_state',
 			'crosspoint_button_state',
+			'timeline_progress',
 		)
 	}
 

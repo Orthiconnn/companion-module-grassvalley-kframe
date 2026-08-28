@@ -41,6 +41,42 @@ export const labeledButtonSvg = (suite: number, heading: string, source: string,
 	).toString('base64')
 }
 
+export const timelineProgressSvg = (
+	suite: number,
+	cursorTime: number,
+	duration: number,
+	paused: boolean,
+	phase: number,
+): string => {
+	const progress = Math.max(0, Math.min(1, duration > 0 ? cursorTime / duration : 0))
+	const dotX = 48 + progress * 264
+	const pulseStep = ((phase % 8) + 8) % 8
+	const dotRadius = paused ? 13 + 3 * Math.sin((pulseStep * Math.PI) / 4) : 13
+	const rings = paused
+		? [0, 3, 6]
+				.map((offset) => {
+					const step = (pulseStep + offset) % 8
+					const radius = 20 + step * 5
+					const opacity = Math.max(0, 0.75 * (1 - step / 8))
+					return `<circle cx="${dotX.toFixed(2)}" cy="238" r="${radius}" fill="none" stroke="#7ffcff" stroke-width="5" opacity="${opacity.toFixed(2)}"/>`
+				})
+				.join('')
+		: ''
+	return Buffer.from(
+		`
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="360" viewBox="0 0 360 360">
+	<line x1="48" y1="238" x2="312" y2="238" stroke="#18383d" stroke-width="20" stroke-linecap="round"/>
+	<line x1="48" y1="238" x2="${dotX.toFixed(2)}" y2="238" stroke="#7ffcff" stroke-width="12" stroke-linecap="round"/>
+	${rings}
+	<circle cx="${dotX.toFixed(2)}" cy="238" r="${dotRadius.toFixed(2)}" fill="#ffffff" stroke="#00cfd5" stroke-width="6"/>
+	<g transform="translate(24 -24)">
+		<circle cx="38" cy="322" r="31" fill="#050505" stroke="#00cfd5" stroke-width="6"/>
+		<path d="${SUITE_NUMBER_PATHS[suite]}" fill="none" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+	</g>
+</svg>`,
+	).toString('base64')
+}
+
 /**
  * Suite indicators are authored as vectors. Companion's button-style API only
  * exposes the historical `png64` bitmap slot, but its renderer accepts SVG

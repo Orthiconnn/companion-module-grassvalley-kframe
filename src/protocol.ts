@@ -10,6 +10,12 @@ export type ConnectionInfo = {
 }
 export type SourceName = { id: number; oled: string; short: string; eng: string; panel: string; menu: string }
 export type MacroCatalogEntry = { oled?: string; panel?: string; comment?: string }
+export type TimelineState = {
+	cursorTime: number | null
+	duration: number | null
+	pauseState: number
+	runState: number | null
+}
 
 export type ProtocolManager = {
 	initialize(settings: unknown): void
@@ -35,6 +41,7 @@ export type ProtocolManager = {
 	getSourceNames(id: string): SourceName[]
 	getAuxSource(id: string, aux: number): number | null
 	getMESource(id: string, address: number): number | null
+	getTimelineState(id: string): TimelineState | null
 	sendMacro(id: string, macro: number): CommandResult
 	sendMacroStop(id: string, macro: number): CommandResult
 	sendMacroStopAll(id: string): CommandResult
@@ -51,6 +58,7 @@ export type ProtocolManager = {
 	subscribeToAuxBus(id: string): CommandResult
 	subscribeToMEBus(id: string): CommandResult
 	subscribeToSourceNames(id: string): CommandResult
+	subscribeToMasterTimeline(id: string): CommandResult
 	clientEmitter: NodeJS.EventEmitter
 }
 

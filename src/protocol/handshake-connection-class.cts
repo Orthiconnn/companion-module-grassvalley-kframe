@@ -69,6 +69,11 @@ class HandshakeConnection {
         this.subscribedMEs = new Set();      // Tracking set (like subscribedAuxes)
         this.meSubscriptionIds = new Map();  // subscriptionId -> address byte
 
+        // Master E-MEM timeline scalar subscriptions
+        this.timelineState = { cursorTime: null, duration: null, pauseState: 0, runState: null };
+        this.timelineSubscriptionIds = new Map(); // subscriptionId -> { pid, key }
+        this.timelineSubscribed = false;
+
         // Source name state (0x020b + 0x0210 subscriptions)
         this.sourceNames = new Map();         // sourceId (number) -> { oled, short, eng, panel, menu }
         this.sourceNamesSubscribed = false;
@@ -1672,6 +1677,9 @@ let found = 0;
         this.auxState.clear();        // Clear cached AUX state
         this.subscribedMEs.clear();   // Reset ME subscription tracking
         this.meState.clear();         // Clear cached ME state
+        this.timelineSubscriptionIds.clear();
+        this.timelineSubscribed = false;
+        this.timelineState = { cursorTime: null, duration: null, pauseState: 0, runState: null };
         this.emitter.emit('status', 'DISCONNECTED', 'Closing connection...');
 
         if (this.heartbeatIntervalId) clearInterval(this.heartbeatIntervalId);
@@ -2305,6 +2313,87 @@ let found = 0;
         return { packet, subId };
     }
 
+    /** Build a captured-format scalar CPL parameter subscription (PID + DID). */
+    buildParameterSubscriptionPacket(pid, did, subId = this.nextSubscriptionId++) {
+        const packet = Buffer.alloc(52);
+        let offset = 0;
+        packet.writeUInt16BE(0x0004, offset); offset += 2;
+        packet.writeUInt16BE(this.subscriptionSequence++, offset); offset += 2;
+        packet.writeUInt16BE(0x0002, offset); offset += 2;
+        packet.writeUInt16BE(0x0008, offset); offset += 2;
+        packet.writeUInt32BE(0x00000024, offset); offset += 4;
+        packet.writeUInt32BE(0x0000002e, offset); offset += 4;
+        offset += 16;
+        packet.writeUInt16BE(subId, offset); offset += 2;
+        packet.writeUInt16BE(0x0001, offset); offset += 2;
+        packet.writeUInt16BE(0x0003, offset); offset += 2;
+        packet.writeUInt16BE(0x0003, offset); offset += 2;
+        packet.writeUInt32BE(0x00000000, offset); offset += 4;
+        packet.writeUInt16BE(pid, offset); offset += 2;
+        packet.writeUInt16BE(0x0000, offset); offset += 2;
+        packet.writeUInt32BE(did, offset);
+        return { packet, subId };
+    }
+
+    subscribeToMasterTimeline() {
+        if (this.isClosing || this.mainHandshakeStage !== 9) {
+            return { success: false, message: 'Not connected.' };
+        }
+        if (this.timelineSubscribed) return { success: true, message: 'Already subscribed to master timeline.' };
+
+        const did = 0x35000001;
+        const parameters = [
+            { pid: 5904, key: 'cursorTime' },
+            { pid: 5905, key: 'duration' },
+            { pid: 5921, key: 'pauseState' },
+            { pid: 5012, key: 'runState' }
+        ];
+        let index = 0;
+        const sendNext = () => {
+            if (this.isClosing || index >= parameters.length) {
+                if (index >= parameters.length) {
+                    this.timelineSubscribed = true;
+                    this.emitter.emit('status', 'TIMELINE_SUBSCRIBED', 'Subscribed to master timeline state');
+                }
+                return;
+            }
+            const parameter = parameters[index++];
+            const { packet, subId } = this.buildParameterSubscriptionPacket(parameter.pid, did);
+            this.timelineSubscriptionIds.set(subId, parameter);
+            this.sendToFrame(packet);
+            setTimeout(sendNext, 50);
+        };
+        sendNext();
+        return { success: true, message: 'Master timeline subscription in progress.' };
+    }
+
+    parseTimelineParameterResponse(msg, pb, payLen) {
+        if (payLen < 22 || pb + payLen > msg.length) return false;
+        const subId = msg.readUInt16BE(pb);
+        const expected = this.timelineSubscriptionIds.get(subId);
+        if (!expected) return false;
+        const pid = msg.readUInt16BE(pb + 8);
+        const did = msg.readUInt32BE(pb + 12);
+        const dataType = msg.readUInt16BE(pb + 18);
+        if (pid !== expected.pid || did !== 0x35000001) return false;
+
+        let value;
+        if ([5, 11, 12, 13, 14, 15, 16, 17].includes(dataType) && payLen >= 24) value = msg.readFloatBE(pb + 20);
+        else if (dataType === 0 || dataType === 18) value = msg.readInt16BE(pb + 20);
+        else if (dataType === 1 && payLen >= 24) value = msg.readInt32BE(pb + 20);
+        else if (dataType === 2) value = msg.readUInt16BE(pb + 20);
+        else if (dataType === 3 && payLen >= 24) value = msg.readUInt32BE(pb + 20);
+        else if (dataType === 4) value = msg[pb + 20] ? 1 : 0;
+        else return false;
+        if (!Number.isFinite(value)) return false;
+
+        if (this.timelineState[expected.key] !== value) {
+            this.timelineState[expected.key] = value;
+            this.emitter.emit('timelineStateChanged', { ...this.timelineState });
+        }
+        return true;
+    }
+
     /**
      * Subscribe to AUX bus source selection updates.
      * Sends 96 individual subscription packets (one per AUX bus, 0x00-0x5f).
@@ -2427,7 +2516,9 @@ let found = 0;
                     // Dispatch by subscription type
                     const firstWord = msg.readUInt16BE(pb);
 
-                    if (firstWord === 0x0210) {
+                    if (this.timelineSubscriptionIds.has(firstWord)) {
+                        this.parseTimelineParameterResponse(msg, pb, payLen);
+                    } else if (firstWord === 0x0210) {
                         // Source definition response — engineering names
                         this.parseSourceDefResponse(msg, pb, payLen);
                     } else if (firstWord === 0x020b) {
@@ -2706,6 +2797,10 @@ let found = 0;
      */
     getMESource(address) {
         return this.meState.get(address) || null;
+    }
+
+    getTimelineState() {
+        return { ...this.timelineState };
     }
 
     /**
