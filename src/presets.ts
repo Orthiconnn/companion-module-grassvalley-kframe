@@ -353,16 +353,16 @@ export function UpdatePresets(self: ModuleInstance): void {
 	}
 	for (const family of busFamilies) {
 		for (const transition of ['cut', 'auto'] as const) {
+			const targetLabel = `${family.target} BOTH`
 			presets[`transition-${family.id}-${transition}`] = {
 				type: 'simple',
 				name: `${family.label} Program ${transition.toUpperCase()}`,
-				style: {
-					text: `${family.label} PGM\n${transition.toUpperCase()}`,
-					size: 10,
-					color: family.text,
-					bgcolor: transition === 'auto' ? family.bright : family.dark,
-					...suiteBadgeStyle,
-				},
+				style: labeledPresetStyle(
+					targetLabel,
+					transition.toUpperCase(),
+					family.text,
+					transition === 'auto' ? family.bright : family.dark,
+				),
 				steps: [
 					{
 						down: [

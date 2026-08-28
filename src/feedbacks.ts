@@ -272,10 +272,20 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				if (!assignment) return {}
 				const target = assignment.target.replace('_', ' ')
 				const transition = assignment.transition.toUpperCase()
+				const me = assignment.target.split('_')[0]
+				const textColors: Record<string, number> = {
+					ME1: 0xffffff,
+					ME2: 0x000000,
+					ME3: 0x000000,
+					ME4: 0xffffff,
+					PGM: 0xffffff,
+				}
+				const color = textColors[me] ?? 0xffffff
 				return {
-					text: assignment.labelOverride || `${target}\n${transition}`,
-					png64: SUITE_BADGES[suiteNumber(assignment.suite)],
-					pngalignment: 'left:bottom',
+					text: '',
+					png64: labeledButtonSvg(suiteNumber(assignment.suite), target, assignment.labelOverride || transition, color),
+					pngalignment: 'center:bottom',
+					color,
 				}
 			},
 		},

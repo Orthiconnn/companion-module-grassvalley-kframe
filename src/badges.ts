@@ -70,7 +70,7 @@ export const timelineProgressSvg = (
 		.filter((time) => !(paused && Math.abs(time - cursorTime) <= pauseTolerance))
 		.map((time) => {
 			const x = 48 + (time / duration) * 264
-			return `<polygon points="${x.toFixed(2)},${trackY - 14} ${(x + 14).toFixed(2)},${trackY} ${x.toFixed(2)},${trackY + 14} ${(x - 14).toFixed(2)},${trackY}" fill="#ff8c00" stroke="#8f3900" stroke-width="4"/>`
+			return `<polygon points="${x.toFixed(2)},${trackY - 20} ${(x + 20).toFixed(2)},${trackY} ${x.toFixed(2)},${trackY + 20} ${(x - 20).toFixed(2)},${trackY}" fill="#ff8c00" stroke="#8f3900" stroke-width="5"/>`
 		})
 		.join('')
 	const dotFill = paused ? '#ff8c00' : '#98e700'
