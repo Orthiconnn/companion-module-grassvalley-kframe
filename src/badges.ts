@@ -36,9 +36,9 @@ export const labeledButtonSvg = (
 	const sourceSize = Math.round(Math.max(26, Math.min(60, Math.floor(580 / Math.max(source.length, 1)))) * scale)
 	const sourceWidthLimit = source.length > 20 ? ' textLength="300" lengthAdjust="spacingAndGlyphs"' : ''
 	const transitionProgress = Math.max(0, Math.min(1, transition?.ramp ?? 0))
-	const transitionHeight = transitionProgress * 252
+	const transitionHeight = transitionProgress * 280
 	const transitionStrip = transition?.active
-		? `<rect x="314" y="${(316 - transitionHeight).toFixed(2)}" width="30" height="${transitionHeight.toFixed(2)}" rx="3" fill="#98e700" stroke="#315f00" stroke-width="5"/>`
+		? `<rect x="322" y="${(316 - transitionHeight).toFixed(2)}" width="28" height="${transitionHeight.toFixed(2)}" rx="3" fill="#98e700" stroke="#315f00" stroke-width="5"/>`
 		: ''
 	return Buffer.from(
 		`
