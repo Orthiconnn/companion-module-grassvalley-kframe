@@ -38,7 +38,7 @@ export const labeledButtonSvg = (
 	const transitionProgress = Math.max(0, Math.min(1, transition?.ramp ?? 0))
 	const transitionHeight = transitionProgress * 280
 	const transitionStrip = transition?.active
-		? `<rect x="328" y="${(316 - transitionHeight).toFixed(2)}" width="26" height="${transitionHeight.toFixed(2)}" rx="3" fill="#98e700" stroke="#315f00" stroke-width="5"/>`
+		? `<rect x="333" y="${(316 - transitionHeight).toFixed(2)}" width="22" height="${transitionHeight.toFixed(2)}" rx="3" fill="#98e700" stroke="#315f00" stroke-width="5"/>`
 		: ''
 	return Buffer.from(
 		`
