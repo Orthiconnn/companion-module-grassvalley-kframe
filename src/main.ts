@@ -287,42 +287,49 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	}
 
 	sourceChoices(maximum: number): DropdownChoice<number>[] {
-		const labels = new Map<number, string>()
+		const liveNames = new Map<number, string>()
 		// Action definitions are module-wide, so the lowest-numbered connected suite
 		// deterministically supplies the label when suites disagree about a source name.
 		for (const suite of SUITES) {
 			for (const source of protocol.getSourceNames(this.connectionId(suite))) {
-				if (source.id < 1 || source.id > maximum || labels.has(source.id)) continue
+				if (source.id < 1 || source.id > maximum || liveNames.has(source.id)) continue
 				const name = source.menu || source.oled || source.panel || source.eng || source.short
-				if (name) labels.set(source.id, name)
+				if (name) liveNames.set(source.id, name)
 			}
 		}
-		if (!labels.has(1)) labels.set(1, 'Source 1')
-		return [...labels.entries()]
-			.sort(([a], [b]) => a - b)
-			.map(([id, label]) => ({ id, label: label === `Source ${id}` ? label : `${id} — ${label}` }))
+		// Keep every valid source selectable while disconnected. Live frame names
+		// replace these deterministic fallbacks as soon as the catalog arrives.
+		return Array.from({ length: maximum }, (_, index) => {
+			const id = index + 1
+			const name = liveNames.get(id)
+			return { id, label: name ? `${id} — ${name}` : `Source ${id}` }
+		})
 	}
 
 	sourceDisplayName(source: number): string {
-		const choice = this.sourceChoices(850).find((entry) => entry.id === source)
-		return choice?.label ?? `Source ${source}`
+		for (const suite of SUITES) {
+			const name = protocol.resolveSourceDisplayName(this.connectionId(suite), source)
+			if (name) return `${source} — ${name}`
+		}
+		return `Source ${source}`
 	}
 
 	macroChoices(): DropdownChoice<number>[] {
-		const labels = new Map<number, string>()
+		const liveNames = new Map<number, string>()
 		for (const suite of SUITES) {
 			const catalog = protocol.getMacroCatalog(this.connectionId(suite)) ?? {}
 			for (const [rawNumber, entry] of Object.entries(catalog)) {
 				const macro = Number(rawNumber)
-				if (macro < 1 || macro > 999 || labels.has(macro)) continue
+				if (macro < 1 || macro > 999 || liveNames.has(macro)) continue
 				const name = entry.oled || entry.panel || entry.comment
-				if (name) labels.set(macro, name)
+				if (name) liveNames.set(macro, name)
 			}
 		}
-		if (!labels.has(1)) labels.set(1, 'Macro 1')
-		return [...labels.entries()]
-			.sort(([a], [b]) => a - b)
-			.map(([id, label]) => ({ id, label: label === `Macro ${id}` ? label : `${id} — ${label}` }))
+		return Array.from({ length: 999 }, (_, index) => {
+			const id = index + 1
+			const name = liveNames.get(id)
+			return { id, label: name ? `${id} — ${name}` : `Macro ${id}` }
+		})
 	}
 
 	macroDisplayName(suite: SuiteId, macro: number): string {
