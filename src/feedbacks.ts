@@ -273,18 +273,20 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				const target = assignment.target.replace('_', ' ')
 				const transition = assignment.transition.toUpperCase()
 				const me = assignment.target.split('_')[0]
-				const textColors: Record<string, number> = {
-					ME1: 0xffffff,
-					ME2: 0x000000,
-					ME3: 0x000000,
-					ME4: 0xffffff,
-					PGM: 0xffffff,
+				const familyColors: Record<string, { bright: number; dark: number; text: number }> = {
+					ME1: { bright: 0x2e9d55, dark: 0x1d6538, text: 0xffffff },
+					ME2: { bright: 0xffd21f, dark: 0xb08c00, text: 0x000000 },
+					ME3: { bright: 0xff7a18, dark: 0xa84b00, text: 0x000000 },
+					ME4: { bright: 0x9b59b6, dark: 0x633974, text: 0xffffff },
+					PGM: { bright: 0xd93636, dark: 0x8d2020, text: 0xffffff },
 				}
-				const color = textColors[me] ?? 0xffffff
+				const family = familyColors[me] ?? { bright: 0x444444, dark: 0x222222, text: 0xffffff }
+				const color = family.text
 				return {
 					text: '',
 					png64: labeledButtonSvg(suiteNumber(assignment.suite), target, assignment.labelOverride || transition, color),
 					pngalignment: 'center:bottom',
+					bgcolor: assignment.transition === 'auto' ? family.bright : family.dark,
 					color,
 				}
 			},
