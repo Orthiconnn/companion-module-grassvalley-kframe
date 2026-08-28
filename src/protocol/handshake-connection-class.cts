@@ -70,9 +70,16 @@ class HandshakeConnection {
         this.meSubscriptionIds = new Map();  // subscriptionId -> address byte
 
         // Master E-MEM timeline scalar subscriptions
-        this.timelineState = { cursorTime: null, duration: null, pauseState: 0, runState: null };
+        this.timelineState = { cursorTime: null, duration: null, pauseState: 0, runState: null, pausePoints: [] };
         this.timelineSubscriptionIds = new Map(); // subscriptionId -> { pid, key }
+        this.timelineKeyframeSubscriptionId = null;
+        this.timelineKeyframes = new Map(); // item handle -> { time, pause }
         this.timelineSubscribed = false;
+
+        // Image Store display-image subscriptions (output 1-10)
+        this.imageStoreState = new Map();
+        this.imageStoreSubscriptionIds = new Map(); // subscriptionId -> output
+        this.imageStoreSubscribed = false;
 
         // Source name state (0x020b + 0x0210 subscriptions)
         this.sourceNames = new Map();         // sourceId (number) -> { oled, short, eng, panel, menu }
@@ -1679,7 +1686,12 @@ let found = 0;
         this.meState.clear();         // Clear cached ME state
         this.timelineSubscriptionIds.clear();
         this.timelineSubscribed = false;
-        this.timelineState = { cursorTime: null, duration: null, pauseState: 0, runState: null };
+        this.timelineState = { cursorTime: null, duration: null, pauseState: 0, runState: null, pausePoints: [] };
+        this.timelineKeyframeSubscriptionId = null;
+        this.timelineKeyframes.clear();
+        this.imageStoreState.clear();
+        this.imageStoreSubscriptionIds.clear();
+        this.imageStoreSubscribed = false;
         this.emitter.emit('status', 'DISCONNECTED', 'Closing connection...');
 
         if (this.heartbeatIntervalId) clearInterval(this.heartbeatIntervalId);
@@ -1981,6 +1993,8 @@ let found = 0;
                 if (err) {
                     this.emitter.emit('status', 'ERROR', `Error sending image store: ${err.message}`);
                 } else {
+                    this.imageStoreState.set(outputNum, imageNum);
+                    this.emitter.emit('imageStoreStateChanged', { output: outputNum, image: imageNum });
                     this.emitter.emit('status', 'IMAGE_STORE_SENT', `Output ${outputNum} -> Image ${imageNum}`);
                 }
             });
@@ -2335,6 +2349,28 @@ let found = 0;
         return { packet, subId };
     }
 
+    /** Build the captured CPL list subscription envelope used by the Menu. */
+    buildListSubscriptionPacket(lid, did, subId = this.nextSubscriptionId++) {
+        const packet = Buffer.alloc(52);
+        let offset = 0;
+        packet.writeUInt16BE(0x0004, offset); offset += 2;
+        packet.writeUInt16BE(this.subscriptionSequence++, offset); offset += 2;
+        packet.writeUInt16BE(0x0002, offset); offset += 2;
+        packet.writeUInt16BE(0x0008, offset); offset += 2;
+        packet.writeUInt32BE(0x00000024, offset); offset += 4;
+        packet.writeUInt32BE(0x0000002e, offset); offset += 4;
+        offset += 16;
+        packet.writeUInt16BE(subId, offset); offset += 2;
+        packet.writeUInt16BE(0x0001, offset); offset += 2;
+        packet.writeUInt16BE(0x0004, offset); offset += 2;
+        packet.writeUInt16BE(0x0002, offset); offset += 2;
+        packet.writeUInt32BE(0x00000000, offset); offset += 4;
+        packet.writeUInt16BE(lid, offset); offset += 2;
+        packet.writeUInt16BE(0x0001, offset); offset += 2;
+        packet.writeUInt32BE(did, offset);
+        return { packet, subId };
+    }
+
     subscribeToMasterTimeline() {
         if (this.isClosing || this.mainHandshakeStage !== 9) {
             return { success: false, message: 'Not connected.' };
@@ -2352,8 +2388,11 @@ let found = 0;
         const sendNext = () => {
             if (this.isClosing || index >= parameters.length) {
                 if (index >= parameters.length) {
+                    const list = this.buildListSubscriptionPacket(4, did);
+                    this.timelineKeyframeSubscriptionId = list.subId;
+                    this.sendToFrame(list.packet);
                     this.timelineSubscribed = true;
-                    this.emitter.emit('status', 'TIMELINE_SUBSCRIBED', 'Subscribed to master timeline state');
+                    this.emitter.emit('status', 'TIMELINE_SUBSCRIBED', 'Subscribed to master timeline state and keyframes');
                 }
                 return;
             }
@@ -2390,6 +2429,84 @@ let found = 0;
         if (this.timelineState[expected.key] !== value) {
             this.timelineState[expected.key] = value;
             this.emitter.emit('timelineStateChanged', { ...this.timelineState });
+        }
+        return true;
+    }
+
+    parseTimelineKeyframeResponse(msg, pb, payLen) {
+        if (payLen < 16 || pb + payLen > msg.length) return false;
+        if (msg.readUInt16BE(pb) !== this.timelineKeyframeSubscriptionId) return false;
+        if (msg.readUInt16BE(pb + 2) !== 0x0001 || msg.readUInt16BE(pb + 4) !== 0x0004) return false;
+        if (msg.readUInt16BE(pb + 8) !== 4 || msg.readUInt32BE(pb + 12) !== 0x35000001) return false;
+
+        let changed = false;
+        let pos = pb + 16;
+        const end = pb + payLen;
+        while (pos + 12 <= end) {
+            const handle = msg.readUInt32BE(pos);
+            const status = msg.readUInt16BE(pos + 8);
+            const itemSize = msg.readUInt16BE(pos + 10);
+            const next = pos + 12 + itemSize;
+            if (next > end) break;
+
+            if (status === 0) {
+                if (this.timelineKeyframes.size > 0) changed = true;
+                this.timelineKeyframes.clear();
+            } else if ((status === 1 || status === 2) && itemSize >= 6) {
+                const time = msg.readFloatBE(pos + 12);
+                const pause = msg[pos + 16];
+                if (Number.isFinite(time)) {
+                    const previous = this.timelineKeyframes.get(handle);
+                    if (!previous || previous.time !== time || previous.pause !== pause) changed = true;
+                    this.timelineKeyframes.set(handle, { time, pause });
+                }
+            } else if (status === 3) {
+                changed = this.timelineKeyframes.delete(handle) || changed;
+            }
+            pos = next;
+        }
+
+        if (changed) {
+            const pausePoints = [...this.timelineKeyframes.values()]
+                .filter((item) => item.pause > 0)
+                .map((item) => item.time)
+                .sort((a, b) => a - b);
+            this.timelineState.pausePoints = [...new Set(pausePoints)];
+            this.emitter.emit('timelineStateChanged', { ...this.timelineState, pausePoints: [...this.timelineState.pausePoints] });
+        }
+        return true;
+    }
+
+    subscribeToImageStore() {
+        if (this.isClosing || this.mainHandshakeStage !== 9) return { success: false, message: 'Not connected.' };
+        if (this.imageStoreSubscribed) return { success: true, message: 'Already subscribed to Image Store outputs.' };
+        let output = 1;
+        const sendNext = () => {
+            if (this.isClosing || output > 10) {
+                if (output > 10) this.imageStoreSubscribed = true;
+                return;
+            }
+            const current = output++;
+            const { packet, subId } = this.buildParameterSubscriptionPacket(5936, 0x43000010 + current);
+            this.imageStoreSubscriptionIds.set(subId, current);
+            this.sendToFrame(packet);
+            setTimeout(sendNext, 50);
+        };
+        sendNext();
+        return { success: true, message: 'Image Store output subscription in progress.' };
+    }
+
+    parseImageStoreParameterResponse(msg, pb, payLen) {
+        if (payLen < 24 || pb + payLen > msg.length) return false;
+        const subId = msg.readUInt16BE(pb);
+        const output = this.imageStoreSubscriptionIds.get(subId);
+        if (!output || msg.readUInt16BE(pb + 8) !== 5936) return false;
+        if (msg.readUInt32BE(pb + 12) !== 0x43000010 + output) return false;
+        const image = msg.readUInt32BE(pb + 20);
+        if (image < 1 || image > 8999) return false;
+        if (this.imageStoreState.get(output) !== image) {
+            this.imageStoreState.set(output, image);
+            this.emitter.emit('imageStoreStateChanged', { output, image });
         }
         return true;
     }
@@ -2518,6 +2635,10 @@ let found = 0;
 
                     if (this.timelineSubscriptionIds.has(firstWord)) {
                         this.parseTimelineParameterResponse(msg, pb, payLen);
+                    } else if (firstWord === this.timelineKeyframeSubscriptionId) {
+                        this.parseTimelineKeyframeResponse(msg, pb, payLen);
+                    } else if (this.imageStoreSubscriptionIds.has(firstWord)) {
+                        this.parseImageStoreParameterResponse(msg, pb, payLen);
                     } else if (firstWord === 0x0210) {
                         // Source definition response — engineering names
                         this.parseSourceDefResponse(msg, pb, payLen);
@@ -2800,7 +2921,11 @@ let found = 0;
     }
 
     getTimelineState() {
-        return { ...this.timelineState };
+        return { ...this.timelineState, pausePoints: [...this.timelineState.pausePoints] };
+    }
+
+    getImageStoreImage(output) {
+        return this.imageStoreState.get(output) ?? null;
     }
 
     /**

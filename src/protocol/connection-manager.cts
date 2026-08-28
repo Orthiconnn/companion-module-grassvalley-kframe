@@ -60,6 +60,10 @@ class ConnectionManager {
             this.emitter.emit('timelineStateChanged', connectionId, data);
         });
 
+        connection.emitter.on('imageStoreStateChanged', (data) => {
+            this.emitter.emit('imageStoreStateChanged', connectionId, data);
+        });
+
         // Forward source name update events
         connection.emitter.on('sourceNamesUpdated', (data) => {
             this.emitter.emit('sourceNamesUpdated', connectionId, data);
@@ -365,6 +369,18 @@ class ConnectionManager {
         return connection.subscribeToMasterTimeline();
     }
 
+    subscribeToImageStore(connectionId) {
+        const connection = this.connections.get(connectionId);
+        if (!connection) return { success: false, message: `No connection found: ${connectionId}` };
+        return connection.subscribeToImageStore();
+    }
+
+    getImageStoreImage(connectionId, output) {
+        const connection = this.connections.get(connectionId);
+        if (!connection) return null;
+        return connection.getImageStoreImage(output);
+    }
+
     sendTimelineEvent(connectionId, eid, did, data) {
         const connection = this.connections.get(connectionId);
         if (!connection) return { success: false, message: `No connection found: ${connectionId}` };
@@ -474,6 +490,8 @@ module.exports = {
     getMESource: (id, address) => connectionManager.getMESource(id, address),
 	 getTimelineState: (id) => connectionManager.getTimelineState(id),
 	 subscribeToMasterTimeline: (id) => connectionManager.subscribeToMasterTimeline(id),
+	 subscribeToImageStore: (id) => connectionManager.subscribeToImageStore(id),
+	 getImageStoreImage: (id, output) => connectionManager.getImageStoreImage(id, output),
 	 sendTimelineEvent: (id, eid, did, data) => connectionManager.sendTimelineEvent(id, eid, did, data),
     getAllMEState: (id) => connectionManager.getAllMEState(id),
     isSourceOnAnyME: (id, sourceNum, excludeAddress) => connectionManager.isSourceOnAnyME(id, sourceNum, excludeAddress),

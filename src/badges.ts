@@ -47,6 +47,7 @@ export const timelineProgressSvg = (
 	duration: number,
 	paused: boolean,
 	phase: number,
+	pausePoints: number[],
 ): string => {
 	const progress = Math.max(0, Math.min(1, duration > 0 ? cursorTime / duration : 0))
 	const dotX = 48 + progress * 264
@@ -63,6 +64,15 @@ export const timelineProgressSvg = (
 				})
 				.join('')
 		: ''
+	const pauseTolerance = Math.max(duration / 264, 0.01)
+	const pauseDiamonds = pausePoints
+		.filter((time) => Number.isFinite(time) && time >= 0 && time <= duration)
+		.filter((time) => !(paused && Math.abs(time - cursorTime) <= pauseTolerance))
+		.map((time) => {
+			const x = 48 + (time / duration) * 264
+			return `<polygon points="${x.toFixed(2)},${trackY - 14} ${(x + 14).toFixed(2)},${trackY} ${x.toFixed(2)},${trackY + 14} ${(x - 14).toFixed(2)},${trackY}" fill="#ff8c00" stroke="#8f3900" stroke-width="4"/>`
+		})
+		.join('')
 	const dotFill = paused ? '#ff8c00' : '#98e700'
 	const dotStroke = paused ? '#b84a00' : '#4c7300'
 	return Buffer.from(
@@ -70,6 +80,7 @@ export const timelineProgressSvg = (
 <svg xmlns="http://www.w3.org/2000/svg" width="360" height="360" viewBox="0 0 360 360">
 	<line x1="48" y1="${trackY}" x2="312" y2="${trackY}" stroke="#17351c" stroke-width="26" stroke-linecap="round"/>
 	<line x1="48" y1="${trackY}" x2="${dotX.toFixed(2)}" y2="${trackY}" stroke="#98e700" stroke-width="18" stroke-linecap="round"/>
+	${pauseDiamonds}
 	${rings}
 	<circle cx="${dotX.toFixed(2)}" cy="${trackY}" r="${dotRadius.toFixed(2)}" fill="${dotFill}" stroke="${dotStroke}" stroke-width="6"/>
 	<g transform="translate(24 -24)">

@@ -210,6 +210,42 @@ timelineIssue.writeFloatBE(12.5, 20)
 h.timelineSubscriptionIds.set(timelineSubId, { pid: 5904, key: 'cursorTime' })
 assertValue('timeline cursor response parsed', h.parseTimelineParameterResponse(timelineIssue, 0, 24), true)
 assertValue('timeline cursor float state', h.getTimelineState().cursorTime, 12.5)
+const keyframeSubId = 0x5301
+assertEqual(
+	'timeline projected-keyframe list subscription',
+	h.buildListSubscriptionPacket(4, 0x35000001, keyframeSubId).packet,
+	`0004123500020008000000240000002e000000000000000000000000000000005301000100040002000000000004000135000001`,
+)
+const keyframeIssue = Buffer.alloc(34)
+keyframeIssue.writeUInt16BE(keyframeSubId, 0)
+keyframeIssue.writeUInt16BE(1, 2)
+keyframeIssue.writeUInt16BE(4, 4)
+keyframeIssue.writeUInt16BE(1, 6)
+keyframeIssue.writeUInt16BE(4, 8)
+keyframeIssue.writeUInt16BE(1, 10)
+keyframeIssue.writeUInt32BE(0x35000001, 12)
+keyframeIssue.writeUInt32BE(0x1234, 16)
+keyframeIssue.writeUInt32BE(0, 20)
+keyframeIssue.writeUInt16BE(1, 24)
+keyframeIssue.writeUInt16BE(6, 26)
+keyframeIssue.writeFloatBE(18.25, 28)
+keyframeIssue[32] = 1
+h.timelineKeyframeSubscriptionId = keyframeSubId
+assertValue('timeline pause-point list response parsed', h.parseTimelineKeyframeResponse(keyframeIssue, 0, 34), true)
+assertValue('timeline pause-point time state', h.getTimelineState().pausePoints[0], 18.25)
+const imageStoreSubId = 0x5302
+const imageStoreIssue = Buffer.alloc(24)
+imageStoreIssue.writeUInt16BE(imageStoreSubId, 0)
+imageStoreIssue.writeUInt16BE(1, 2)
+imageStoreIssue.writeUInt16BE(3, 4)
+imageStoreIssue.writeUInt16BE(5936, 8)
+imageStoreIssue.writeUInt32BE(0x43000013, 12)
+imageStoreIssue.writeUInt16BE(4, 16)
+imageStoreIssue.writeUInt16BE(3, 18)
+imageStoreIssue.writeUInt32BE(1500, 20)
+h.imageStoreSubscriptionIds.set(imageStoreSubId, 3)
+assertValue('image-store display-image response parsed', h.parseImageStoreParameterResponse(imageStoreIssue, 0, 24), true)
+assertValue('image-store output state', h.getImageStoreImage(3), 1500)
 
 // ─── B1: All 50 crosspoint targets ──────────────────────────
 

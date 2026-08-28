@@ -1,10 +1,18 @@
 import type { ModuleSchema } from './main.js'
 import type ModuleInstance from './main.js'
 import type { CompanionPresetDefinitions, CompanionPresetSection } from '@companion-module/base'
-import { SUITE_BADGES } from './badges.js'
+import { labeledButtonSvg, SUITE_BADGES } from './badges.js'
 
 export function UpdatePresets(self: ModuleInstance): void {
 	const suiteBadgeStyle = { png64: SUITE_BADGES[1], pngalignment: 'left:bottom' as const }
+	const labeledPresetStyle = (heading: string, center: string, color: number, bgcolor: number) => ({
+		text: '',
+		size: 10,
+		color,
+		bgcolor,
+		png64: labeledButtonSvg(1, heading, center, color),
+		pngalignment: 'center:bottom' as const,
+	})
 	const suiteBadgeFeedback = () => ({ feedbackId: 'suite_badge' as const, options: {} })
 	const macroFeedback = () => ({ feedbackId: 'macro_button_state' as const, options: { automaticLabel: true } })
 	const auxFeedback = () => ({ feedbackId: 'aux_button_state' as const, options: { automaticLabel: true } })
@@ -13,6 +21,16 @@ export function UpdatePresets(self: ModuleInstance): void {
 		options: { automaticLabel: true },
 	})
 	const timelineProgressFeedback = () => ({ feedbackId: 'timeline_progress' as const, options: { suite: 'suite1a' } })
+	const imageStoreFeedback = () => ({
+		feedbackId: 'image_store_button_state' as const,
+		options: { automaticLabel: true },
+	})
+	const panelMemoryFeedback = () => ({
+		feedbackId: 'panel_memory_button_state' as const,
+		options: { automaticLabel: true },
+	})
+	const gpiFeedback = () => ({ feedbackId: 'gpi_button_state' as const, options: {} })
+	const transitionFeedback = () => ({ feedbackId: 'transition_button_state' as const, options: {} })
 	const source1Label = self.sourceDisplayName(1)
 	const busFamilies = [
 		{ id: 'me1', target: 'ME1', label: 'ME1', mappingBus: 'me1', bright: 0x2e9d55, dark: 0x1d6538, text: 0xffffff },
@@ -220,7 +238,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 		'aux1-source1': {
 			type: 'simple',
 			name: `AUX 1 ${source1Label}`,
-			style: { text: `AUX 1\n${source1Label}`, size: 10, color: 0xffffff, bgcolor: 0x5c005c, ...suiteBadgeStyle },
+			style: labeledPresetStyle('AUX 1', source1Label, 0xffffff, 0x5c005c),
 			steps: [
 				{
 					down: [{ actionId: 'aux_route', options: { suite: 'suite1a', aux: 1, source: 1, transition: 'cut' } }],
@@ -232,16 +250,16 @@ export function UpdatePresets(self: ModuleInstance): void {
 		'panel-memory1': {
 			type: 'simple',
 			name: 'Panel Memory 1',
-			style: { text: 'PANEL\nMEM 1', size: 10, color: 0xffffff, bgcolor: 0x3a506b, ...suiteBadgeStyle },
+			style: labeledPresetStyle('PNL MEM', '1', 0xffffff, 0x3a506b),
 			steps: [{ down: [{ actionId: 'panel_memory', options: { suite: 'suite1a', value: 1 } }], up: [] }],
-			feedbacks: [suiteBadgeFeedback()],
+			feedbacks: [panelMemoryFeedback()],
 		},
 		'image-store-output1-image1': {
 			type: 'simple',
 			name: 'Image Store Output 1 Image 0001',
-			style: { text: 'OUT 1\nIMAGE 0001', size: 10, color: 0xffffff, bgcolor: 0x6a4c93, ...suiteBadgeStyle },
+			style: labeledPresetStyle('IS1', '0001', 0xffffff, 0x6a4c93),
 			steps: [{ down: [{ actionId: 'image_store', options: { suite: 'suite1a', output: 1, image: 1 } }], up: [] }],
-			feedbacks: [suiteBadgeFeedback()],
+			feedbacks: [imageStoreFeedback()],
 		},
 		'image-input1': {
 			type: 'simple',
@@ -255,7 +273,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 			name: 'GPI 1',
 			style: { text: 'GPI\n1', size: 10, color: 0xffffff, bgcolor: 0xf77f00, ...suiteBadgeStyle },
 			steps: [{ down: [{ actionId: 'gpi', options: { suite: 'suite1a', value: 1 } }], up: [] }],
-			feedbacks: [suiteBadgeFeedback()],
+			feedbacks: [gpiFeedback()],
 		},
 		'pbus-recall1': {
 			type: 'simple',
@@ -304,7 +322,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 		presets[`aux${aux}-source${source}`] = {
 			type: 'simple',
 			name: `AUX ${aux} ${source1Label}`,
-			style: { text: `AUX ${aux}\n${source1Label}`, size: 10, color: 0xffffff, bgcolor: 0x5c005c, ...suiteBadgeStyle },
+			style: labeledPresetStyle(`AUX ${aux}`, source1Label, 0xffffff, 0x5c005c),
 			steps: [
 				{ down: [{ actionId: 'aux_route', options: { suite: 'suite1a', aux, source, transition: 'cut' } }], up: [] },
 			],
@@ -313,16 +331,11 @@ export function UpdatePresets(self: ModuleInstance): void {
 	}
 	for (const family of busFamilies) {
 		for (const side of ['A', 'B'] as const) {
+			const busLabel = `${family.label}${side}`
 			presets[`crosspoint-${family.id}-${side.toLowerCase()}-source1`] = {
 				type: 'simple',
 				name: `${family.label} ${side} ${source1Label}`,
-				style: {
-					text: `${family.label} ${side}\n${source1Label}`,
-					size: 10,
-					color: family.text,
-					bgcolor: side === 'A' ? family.bright : family.dark,
-					...suiteBadgeStyle,
-				},
+				style: labeledPresetStyle(busLabel, source1Label, family.text, side === 'A' ? family.bright : family.dark),
 				steps: [
 					{
 						down: [
@@ -361,7 +374,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 						up: [],
 					},
 				],
-				feedbacks: [suiteBadgeFeedback()],
+				feedbacks: [transitionFeedback()],
 			}
 		}
 	}
@@ -387,15 +400,9 @@ export function UpdatePresets(self: ModuleInstance): void {
 		presets[`image-store-output${output}-image1`] = {
 			type: 'simple',
 			name: `Image Store Output ${output} Image 0001`,
-			style: {
-				text: `OUT ${output}\nIMAGE 0001`,
-				size: 10,
-				color: 0xffffff,
-				bgcolor: 0x6a4c93,
-				...suiteBadgeStyle,
-			},
+			style: labeledPresetStyle(`IS${output}`, '0001', 0xffffff, 0x6a4c93),
 			steps: [{ down: [{ actionId: 'image_store', options: { suite: 'suite1a', output, image: 1 } }], up: [] }],
-			feedbacks: [suiteBadgeFeedback()],
+			feedbacks: [imageStoreFeedback()],
 		}
 	}
 	for (let gpi = 2; gpi <= 32; gpi++) {
@@ -404,22 +411,16 @@ export function UpdatePresets(self: ModuleInstance): void {
 			name: `GPI ${gpi}`,
 			style: { text: `GPI\n${gpi}`, size: 10, color: 0xffffff, bgcolor: 0xf77f00, ...suiteBadgeStyle },
 			steps: [{ down: [{ actionId: 'gpi', options: { suite: 'suite1a', value: gpi } }], up: [] }],
-			feedbacks: [suiteBadgeFeedback()],
+			feedbacks: [gpiFeedback()],
 		}
 	}
 	for (let register = 2; register <= 8; register++) {
 		presets[`panel-memory${register}`] = {
 			type: 'simple',
 			name: `Panel Memory ${register}`,
-			style: {
-				text: `PANEL\nMEM ${register}`,
-				size: 10,
-				color: 0xffffff,
-				bgcolor: 0x3a506b,
-				...suiteBadgeStyle,
-			},
+			style: labeledPresetStyle('PNL MEM', String(register), 0xffffff, 0x3a506b),
 			steps: [{ down: [{ actionId: 'panel_memory', options: { suite: 'suite1a', value: register } }], up: [] }],
-			feedbacks: [suiteBadgeFeedback()],
+			feedbacks: [panelMemoryFeedback()],
 		}
 	}
 	for (const family of busFamilies) {

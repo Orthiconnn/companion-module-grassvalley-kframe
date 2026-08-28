@@ -51,6 +51,16 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		string,
 		{ suite: SuiteId; target: string; source: number; labelOverride: string }
 	>()
+	readonly imageStoreButtons = new Map<
+		string,
+		{ suite: SuiteId; output: number; image: number; labelOverride: string }
+	>()
+	readonly panelMemoryButtons = new Map<string, { suite: SuiteId; register: number; labelOverride: string }>()
+	readonly gpiButtons = new Map<string, { suite: SuiteId; gpi: number; labelOverride: string }>()
+	readonly transitionButtons = new Map<
+		string,
+		{ suite: SuiteId; target: string; transition: string; labelOverride: string }
+	>()
 	readonly suiteButtons = new Map<string, Map<string, SuiteId>>()
 	private sourceRefreshTimer?: NodeJS.Timeout
 	private macroCatalogRefreshTimer?: NodeJS.Timeout
@@ -72,6 +82,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		protocol.clientEmitter.on('auxStateChanged', this.handleAuxStateChanged)
 		protocol.clientEmitter.on('meStateChanged', this.handleMEStateChanged)
 		protocol.clientEmitter.on('timelineStateChanged', this.handleTimelineStateChanged)
+		protocol.clientEmitter.on('imageStoreStateChanged', this.handleImageStoreStateChanged)
 
 		this.updateActions() // export actions
 		this.updateFeedbacks() // export feedbacks
@@ -102,6 +113,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		protocol.clientEmitter.off('auxStateChanged', this.handleAuxStateChanged)
 		protocol.clientEmitter.off('meStateChanged', this.handleMEStateChanged)
 		protocol.clientEmitter.off('timelineStateChanged', this.handleTimelineStateChanged)
+		protocol.clientEmitter.off('imageStoreStateChanged', this.handleImageStoreStateChanged)
 		await Promise.all(SUITES.map(async (id) => protocol.disconnectConnection(this.connectionId(id))))
 	}
 
@@ -157,6 +169,11 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		}, 100)
 	}
 
+	private handleImageStoreStateChanged = (connectionId: string): void => {
+		if (!SUITES.some((suite) => this.connectionId(suite) === connectionId)) return
+		this.checkFeedbacks('image_store_button_state')
+	}
+
 	private handleProtocolStatus = (connectionId: string, type: string, message: unknown): void => {
 		const id = SUITES.find((suite) => this.connectionId(suite) === connectionId)
 		if (!id) return
@@ -172,6 +189,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			setTimeout(() => protocol.subscribeToAuxBus(protocolId), 200)
 			setTimeout(() => protocol.subscribeToMEBus(protocolId), 400)
 			setTimeout(() => protocol.subscribeToMasterTimeline(protocolId), 600)
+			setTimeout(() => protocol.subscribeToImageStore(protocolId), 800)
 		} else if (type === 'HEARTBEAT_ACK') {
 			state.heartbeatFlash = true
 			this.checkFeedbacks('connection_state')
@@ -304,6 +322,88 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.checkFeedbacks('aux_button_state')
 	}
 
+	trackImageStoreButton(
+		controlId: string,
+		suite: unknown,
+		output: unknown,
+		image: unknown,
+		labelOverride: unknown = '',
+	): void {
+		const targetSuite = suiteId(suite)
+		this.imageStoreButtons.set(controlId, {
+			suite: targetSuite,
+			output: Number(output) || 1,
+			image: Number(image) || 1,
+			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
+		})
+		this.trackSuiteButton(controlId, 'image_store', targetSuite)
+		this.checkFeedbacks('image_store_button_state')
+	}
+
+	untrackImageStoreButton(controlId: string): void {
+		this.imageStoreButtons.delete(controlId)
+		this.untrackSuiteButton(controlId, 'image_store')
+		this.checkFeedbacks('image_store_button_state')
+	}
+
+	trackPanelMemoryButton(controlId: string, suite: unknown, register: unknown, labelOverride: unknown = ''): void {
+		const targetSuite = suiteId(suite)
+		this.panelMemoryButtons.set(controlId, {
+			suite: targetSuite,
+			register: Number(register) || 1,
+			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
+		})
+		this.trackSuiteButton(controlId, 'panel_memory', targetSuite)
+		this.checkFeedbacks('panel_memory_button_state')
+	}
+
+	untrackPanelMemoryButton(controlId: string): void {
+		this.panelMemoryButtons.delete(controlId)
+		this.untrackSuiteButton(controlId, 'panel_memory')
+		this.checkFeedbacks('panel_memory_button_state')
+	}
+
+	trackGpiButton(controlId: string, suite: unknown, gpi: unknown, labelOverride: unknown = ''): void {
+		const targetSuite = suiteId(suite)
+		this.gpiButtons.set(controlId, {
+			suite: targetSuite,
+			gpi: Number(gpi) || 1,
+			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
+		})
+		this.trackSuiteButton(controlId, 'gpi', targetSuite)
+		this.checkFeedbacks('gpi_button_state')
+	}
+
+	untrackGpiButton(controlId: string): void {
+		this.gpiButtons.delete(controlId)
+		this.untrackSuiteButton(controlId, 'gpi')
+		this.checkFeedbacks('gpi_button_state')
+	}
+
+	trackTransitionButton(
+		controlId: string,
+		suite: unknown,
+		target: unknown,
+		transition: unknown,
+		labelOverride: unknown = '',
+	): void {
+		const targetSuite = suiteId(suite)
+		this.transitionButtons.set(controlId, {
+			suite: targetSuite,
+			target: String(target),
+			transition: String(transition),
+			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
+		})
+		this.trackSuiteButton(controlId, 'transition', targetSuite)
+		this.checkFeedbacks('transition_button_state')
+	}
+
+	untrackTransitionButton(controlId: string): void {
+		this.transitionButtons.delete(controlId)
+		this.untrackSuiteButton(controlId, 'transition')
+		this.checkFeedbacks('transition_button_state')
+	}
+
 	trackSuiteButton(controlId: string, actionId: string, suite: unknown): void {
 		const actions = this.suiteButtons.get(controlId) ?? new Map<string, SuiteId>()
 		actions.set(actionId, suiteId(suite))
@@ -349,6 +449,10 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			'macro_button_state',
 			'aux_button_state',
 			'crosspoint_button_state',
+			'image_store_button_state',
+			'panel_memory_button_state',
+			'gpi_button_state',
+			'transition_button_state',
 			'timeline_progress',
 		)
 	}

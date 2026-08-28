@@ -16,9 +16,9 @@ export type ActionsSchema = {
 	aux_route: { options: SuiteOption & { aux: number; source: number; transition: string; labelOverride?: string } }
 	crosspoint: { options: SuiteOption & { target: string; source: number; labelOverride?: string } }
 	emem: { options: SuiteOption & { target: string; register: number } }
-	transition: { options: SuiteOption & { target: string; transition: string } }
+	transition: { options: SuiteOption & { target: string; transition: string; labelOverride?: string } }
 	panel_memory: NumberOption
-	image_store: { options: SuiteOption & { output: number; image: number } }
+	image_store: { options: SuiteOption & { output: number; image: number; labelOverride?: string } }
 	image_store_input: NumberOption
 	raw_cpl: { options: SuiteOption & { command: string } }
 	run: { options: SuiteOption & { target: string } }
@@ -284,7 +284,6 @@ export function UpdateActions(self: ModuleInstance): void {
 		},
 		transition: {
 			name: 'Transition: Cut / Auto',
-			...suiteSubscription,
 			options: [
 				suiteOption,
 				{ id: 'target', type: 'dropdown', label: 'Target', default: 'PGM_PRI', choices: transitionChoices },
@@ -298,7 +297,18 @@ export function UpdateActions(self: ModuleInstance): void {
 						{ id: 'auto', label: 'Auto' },
 					],
 				},
+				labelOverrideOption,
 			],
+			optionsToMonitorForSubscribe: ['suite', 'target', 'transition', 'labelOverride'],
+			subscribe: (action) =>
+				self.trackTransitionButton(
+					action.controlId,
+					action.options.suite,
+					action.options.target,
+					action.options.transition,
+					action.options.labelOverride,
+				),
+			unsubscribe: (action) => self.untrackTransitionButton(action.controlId),
 			callback: (e) => {
 				const [me, bus] = String(e.options.target).split('_')
 				const index = meIndexes[me]
@@ -318,8 +328,20 @@ export function UpdateActions(self: ModuleInstance): void {
 		},
 		panel_memory: {
 			name: 'Panel Memory: Recall',
-			...suiteSubscription,
-			options: [suiteOption, { id: 'value', type: 'number', label: 'Register', default: 1, min: 1, max: 99 }],
+			options: [
+				suiteOption,
+				{ id: 'value', type: 'number', label: 'Register', default: 1, min: 1, max: 99 },
+				labelOverrideOption,
+			],
+			optionsToMonitorForSubscribe: ['suite', 'value', 'labelOverride'],
+			subscribe: (action) =>
+				self.trackPanelMemoryButton(
+					action.controlId,
+					action.options.suite,
+					action.options.value,
+					action.options.labelOverride,
+				),
+			unsubscribe: (action) => self.untrackPanelMemoryButton(action.controlId),
 			callback: (e) => resultOrThrow(p.sendPanelMem(id(e), Number(e.options.value))),
 		},
 		image_store: {
@@ -329,7 +351,18 @@ export function UpdateActions(self: ModuleInstance): void {
 				suiteOption,
 				{ id: 'output', type: 'number', label: 'Output', default: 1, min: 1, max: 10 },
 				{ id: 'image', type: 'number', label: 'Image', default: 1, min: 1, max: 8999 },
+				labelOverrideOption,
 			],
+			optionsToMonitorForSubscribe: ['suite', 'output', 'image', 'labelOverride'],
+			subscribe: (action) =>
+				self.trackImageStoreButton(
+					action.controlId,
+					action.options.suite,
+					action.options.output,
+					action.options.image,
+					action.options.labelOverride,
+				),
+			unsubscribe: (action) => self.untrackImageStoreButton(action.controlId),
 			callback: (e) => resultOrThrow(p.sendImageStore(id(e), Number(e.options.output), Number(e.options.image))),
 		},
 		image_store_input: {
@@ -394,8 +427,15 @@ export function UpdateActions(self: ModuleInstance): void {
 		},
 		gpi: {
 			name: 'GPI: Fire',
-			...suiteSubscription,
-			options: [suiteOption, { id: 'value', type: 'number', label: 'GPI', default: 1, min: 1, max: 40 }],
+			options: [
+				suiteOption,
+				{ id: 'value', type: 'number', label: 'GPI', default: 1, min: 1, max: 40 },
+				labelOverrideOption,
+			],
+			optionsToMonitorForSubscribe: ['suite', 'value', 'labelOverride'],
+			subscribe: (action) =>
+				self.trackGpiButton(action.controlId, action.options.suite, action.options.value, action.options.labelOverride),
+			unsubscribe: (action) => self.untrackGpiButton(action.controlId),
 			callback: (e) => resultOrThrow(p.sendRawCommand(id(e), buildGpi(Number(e.options.value)))),
 		},
 		pbus_recall: {

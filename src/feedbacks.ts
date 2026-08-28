@@ -10,6 +10,10 @@ export type FeedbacksSchema = {
 	macro_button_state: { type: 'advanced'; options: { automaticLabel: boolean } }
 	aux_button_state: { type: 'advanced'; options: { automaticLabel: boolean } }
 	crosspoint_button_state: { type: 'advanced'; options: { automaticLabel: boolean } }
+	image_store_button_state: { type: 'advanced'; options: { automaticLabel: boolean } }
+	panel_memory_button_state: { type: 'advanced'; options: { automaticLabel: boolean } }
+	gpi_button_state: { type: 'advanced'; options: Record<string, never> }
+	transition_button_state: { type: 'advanced'; options: Record<string, never> }
 	timeline_progress: { type: 'advanced'; options: SuiteOptions }
 	suite_badge: { type: 'advanced'; options: Record<string, never> }
 }
@@ -205,6 +209,76 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				}
 			},
 		},
+		image_store_button_state: {
+			name: 'Image Store output and loaded still label',
+			type: 'advanced',
+			options: [
+				{ id: 'automaticLabel', type: 'checkbox', label: 'Automatically show output and still', default: true },
+			],
+			callback: (feedback) => {
+				const assignment = self.imageStoreButtons.get(feedback.controlId)
+				if (!assignment) return {}
+				const liveImage = self.protocol.getImageStoreImage(self.connectionId(assignment.suite), assignment.output)
+				const image = liveImage ?? assignment.image
+				const label = assignment.labelOverride || String(image).padStart(4, '0')
+				return {
+					...(feedback.options.automaticLabel ? { text: '' } : {}),
+					png64: feedback.options.automaticLabel
+						? labeledButtonSvg(suiteNumber(assignment.suite), `IS${assignment.output}`, label, 0xffffff)
+						: SUITE_BADGES[suiteNumber(assignment.suite)],
+					pngalignment: feedback.options.automaticLabel ? 'center:bottom' : 'left:bottom',
+				}
+			},
+		},
+		panel_memory_button_state: {
+			name: 'Panel Memory register label',
+			type: 'advanced',
+			options: [
+				{ id: 'automaticLabel', type: 'checkbox', label: 'Automatically show panel-memory register', default: true },
+			],
+			callback: (feedback) => {
+				const assignment = self.panelMemoryButtons.get(feedback.controlId)
+				if (!assignment) return {}
+				const label = assignment.labelOverride || String(assignment.register)
+				return {
+					...(feedback.options.automaticLabel ? { text: '' } : {}),
+					png64: feedback.options.automaticLabel
+						? labeledButtonSvg(suiteNumber(assignment.suite), 'PNL MEM', label, 0xffffff)
+						: SUITE_BADGES[suiteNumber(assignment.suite)],
+					pngalignment: feedback.options.automaticLabel ? 'center:bottom' : 'left:bottom',
+				}
+			},
+		},
+		gpi_button_state: {
+			name: 'GPI number or label override',
+			type: 'advanced',
+			options: [],
+			callback: (feedback) => {
+				const assignment = self.gpiButtons.get(feedback.controlId)
+				if (!assignment) return {}
+				return {
+					text: assignment.labelOverride || `GPI\n${assignment.gpi}`,
+					png64: SUITE_BADGES[suiteNumber(assignment.suite)],
+					pngalignment: 'left:bottom',
+				}
+			},
+		},
+		transition_button_state: {
+			name: 'Transition target/type or label override',
+			type: 'advanced',
+			options: [],
+			callback: (feedback) => {
+				const assignment = self.transitionButtons.get(feedback.controlId)
+				if (!assignment) return {}
+				const target = assignment.target.replace('_', ' ')
+				const transition = assignment.transition.toUpperCase()
+				return {
+					text: assignment.labelOverride || `${target}\n${transition}`,
+					png64: SUITE_BADGES[suiteNumber(assignment.suite)],
+					pngalignment: 'left:bottom',
+				}
+			},
+		},
 		timeline_progress: {
 			name: 'Master timeline progress and paused pulse',
 			type: 'advanced',
@@ -226,6 +300,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 						state.duration,
 						state.pauseState > 0,
 						self.timelinePulsePhase,
+						state.pausePoints,
 					),
 					pngalignment: 'center:bottom',
 				}
