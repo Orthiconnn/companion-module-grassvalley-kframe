@@ -125,7 +125,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 							: 0x285b0b
 				return {
 					...(feedback.options.automaticLabel ? { text: macroName } : {}),
-					png64: SUITE_BADGES[suiteNumber(assignment.suite)],
+					png64: assignment.showSuite ? SUITE_BADGES[suiteNumber(assignment.suite)] : CLEAR_BADGE,
 					pngalignment: 'left:bottom',
 					bgcolor,
 					color: paused ? (self.macroFlashOn ? 0x000000 : 0xffffff) : playing || lastPlayed ? 0x000000 : 0xffffff,
@@ -162,8 +162,11 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 								color,
 								undefined,
 								assignment.textSize,
+								assignment.showSuite,
 							)
-						: SUITE_BADGES[suiteNumber(assignment.suite)],
+						: assignment.showSuite
+							? SUITE_BADGES[suiteNumber(assignment.suite)]
+							: CLEAR_BADGE,
 					pngalignment: feedback.options.automaticLabel ? 'center:bottom' : 'left:bottom',
 					bgcolor: online ? 0xb57edc : 0x5c005c,
 					color,
@@ -189,10 +192,17 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				const [me, bus] = assignment.target.split('_')
 				const meIndex: Record<string, number> = { ME1: 0, ME2: 1, ME3: 2, PGM: 3, ME4: 4 }
 				const index = meIndex[me]
-				const busOffset = ['A', 'B', 'C', 'D'].indexOf(bus) * 0x10
+				const keyer = /^K([1-6])$/.exec(bus)
+				const busOffset = keyer ? (Number(keyer[1]) - 1) * 0x10 : ['A', 'B', 'C', 'D'].indexOf(bus) * 0x10
 				const address = index === undefined || busOffset < 0 ? -1 : index + busOffset
 				const connectionId = self.connectionId(assignment.suite)
-				const online = address >= 0 && self.protocol.getMESource(connectionId, address) === assignment.source
+				const selectedSource =
+					address < 0
+						? null
+						: keyer
+							? self.protocol.getKeyerSource(connectionId, address)
+							: self.protocol.getMESource(connectionId, address)
+				const online = selectedSource !== null && selectedSource === assignment.source
 				const sourceName = self.protocol.resolveSourceDisplayName(connectionId, assignment.source)
 				const sourceLabel = assignment.labelOverride || sourceName || String(assignment.source)
 				const baseColors: Record<string, { bright: number; dark: number; color: number }> = {
@@ -215,8 +225,11 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 								color,
 								undefined,
 								assignment.textSize,
+								self.showSuiteDot(feedback.controlId, 'crosspoint'),
 							)
-						: SUITE_BADGES[suiteNumber(assignment.suite)],
+						: self.showSuiteDot(feedback.controlId, 'crosspoint')
+							? SUITE_BADGES[suiteNumber(assignment.suite)]
+							: CLEAR_BADGE,
 					pngalignment: feedback.options.automaticLabel ? 'center:bottom' : 'left:bottom',
 					bgcolor: online ? 0xff0000 : bus === 'A' ? base.bright : base.dark,
 					color,
@@ -247,8 +260,11 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 								0xffffff,
 								undefined,
 								assignment.textSize,
+								self.showSuiteDot(feedback.controlId, 'image_store'),
 							)
-						: SUITE_BADGES[suiteNumber(assignment.suite)],
+						: self.showSuiteDot(feedback.controlId, 'image_store')
+							? SUITE_BADGES[suiteNumber(assignment.suite)]
+							: CLEAR_BADGE,
 					pngalignment: feedback.options.automaticLabel ? 'center:bottom' : 'left:bottom',
 				}
 			},
@@ -273,8 +289,11 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 								0xffffff,
 								undefined,
 								assignment.textSize,
+								self.showSuiteDot(feedback.controlId, 'panel_memory'),
 							)
-						: SUITE_BADGES[suiteNumber(assignment.suite)],
+						: self.showSuiteDot(feedback.controlId, 'panel_memory')
+							? SUITE_BADGES[suiteNumber(assignment.suite)]
+							: CLEAR_BADGE,
 					pngalignment: feedback.options.automaticLabel ? 'center:bottom' : 'left:bottom',
 				}
 			},
@@ -288,7 +307,9 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				if (!assignment) return {}
 				return {
 					text: assignment.labelOverride || `GPI\n${assignment.gpi}`,
-					png64: SUITE_BADGES[suiteNumber(assignment.suite)],
+					png64: self.showSuiteDot(feedback.controlId, 'gpi')
+						? SUITE_BADGES[suiteNumber(assignment.suite)]
+						: CLEAR_BADGE,
 					pngalignment: 'left:bottom',
 					size: Math.round(10 * assignment.textSize),
 				}
@@ -337,6 +358,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 							? { ramp: telemetry.ramp, active: telemetry.active }
 							: undefined,
 						assignment.textSize,
+						self.showSuiteDot(feedback.controlId, 'transition'),
 					),
 					pngalignment: 'center:bottom',
 					bgcolor: assignment.transition === 'auto' ? family.bright : family.dark,
@@ -380,6 +402,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 						color,
 						undefined,
 						assignment.textSize,
+						self.showSuiteDot(feedback.controlId, 'emem'),
 					),
 					pngalignment: 'center:bottom',
 					color,
@@ -394,6 +417,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 			callback: (feedback) => {
 				const suite = suiteId(feedback.options.suite)
 				const actionTextSize = [...(self.suiteButtons.get(feedback.controlId)?.values() ?? [])][0]?.textSize ?? 1
+				const showSuite = [...(self.suiteButtons.get(feedback.controlId)?.values() ?? [])][0]?.showSuite !== false
 				const state = self.protocol.getTimelineState(self.connectionId(suite))
 				if (
 					state?.duration === null ||
@@ -402,7 +426,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					state.cursorTime === null
 				)
 					return {
-						png64: SUITE_BADGES[suiteNumber(suite)],
+						png64: showSuite ? SUITE_BADGES[suiteNumber(suite)] : CLEAR_BADGE,
 						pngalignment: 'center:bottom',
 						size: Math.round(10 * actionTextSize),
 					}
@@ -414,6 +438,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 						state.pauseState > 0,
 						self.timelinePulsePhase,
 						state.pausePoints,
+						showSuite,
 					),
 					pngalignment: 'center:bottom',
 					size: Math.round(10 * actionTextSize),
@@ -425,12 +450,15 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 			type: 'advanced',
 			options: [],
 			callback: (feedback) => {
-				const assignments = [...(self.suiteButtons.get(feedback.controlId)?.values() ?? [])]
+				const assignments = [...(self.suiteButtons.get(feedback.controlId)?.values() ?? [])].filter(
+					(assignment) => assignment.showSuite,
+				)
+				if (assignments.length === 0) return { png64: CLEAR_BADGE }
 				const suites = new Set(assignments.map((assignment) => assignment.suite))
 				if (suites.size !== 1) return { png64: CLEAR_BADGE }
 				const [suite] = suites
 				const size = assignments[0]?.textSize ?? 1
-				return { png64: SUITE_BADGES[suiteNumber(suite)], pngalignment: 'center:bottom', size: Math.round(10 * size) }
+				return { png64: SUITE_BADGES[suiteNumber(suite)], pngalignment: 'left:bottom', size: Math.round(10 * size) }
 			},
 		},
 	})

@@ -1,5 +1,5 @@
 import { InstanceBase, InstanceStatus, type SomeCompanionConfigField } from '@companion-module/base'
-import { GetConfigFields, type ModuleConfig } from './config.js'
+import { GetConfigFields, maximumRetries, suiteEnabled, type ModuleConfig } from './config.js'
 import { UpdateVariableDefinitions, type VariablesSchema } from './variables.js'
 import { UpgradeScripts } from './upgrades.js'
 import { UpdateActions, type ActionsSchema } from './actions.js'
@@ -26,6 +26,10 @@ export function suiteNumber(id: SuiteId): number {
 	return Number(id[5])
 }
 export function suitePorts(id: SuiteId): [number, number] {
+	// Required fixed UDP ports: Suites 1–4 use 6132/6133 through 6138/6139.
+	// Maintainer confirmed 2026-10-14: conflicts with another local port owner
+	// are understood and accepted. Do not change or auto-select these ports.
+	// See README "Required UDP ports"; error handling and cleanup are separate concerns.
 	const main = 6130 + suiteNumber(id) * 2
 	return [main, main + 1]
 }
@@ -44,44 +48,117 @@ export type ModuleSchema = {
 
 export { UpgradeScripts }
 
+// Feedback displays the most recently subscribed action of each type. Keep all
+// action instances so removing one restores the remaining assignment instead of
+// clearing the whole button. Companion action IDs are unique within a control.
+class ButtonAssignments<T> extends Map<string, T> {
+	private readonly assignments = new Map<string, Map<string, T>>()
+
+	setAction(controlId: string, actionId: string, value: T): void {
+		const actions = this.assignments.get(controlId) ?? new Map<string, T>()
+		actions.delete(actionId)
+		actions.set(actionId, value)
+		this.assignments.set(controlId, actions)
+		this.set(controlId, value)
+	}
+
+	deleteAction(controlId: string, actionId: string): void {
+		const actions = this.assignments.get(controlId)
+		if (!actions?.delete(actionId)) return
+		if (actions.size === 0) {
+			this.assignments.delete(controlId)
+			this.delete(controlId)
+		} else {
+			this.set(controlId, [...actions.values()][actions.size - 1])
+		}
+	}
+}
+
 export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	config!: ModuleConfig // Setup in init()
 	readonly suiteStates = Object.fromEntries(
 		SUITES.map((id) => [id, { status: 'disconnected', frameVersion: '', protocolName: '', heartbeatFlash: false }]),
 	) as Record<SuiteId, SuiteState>
-	readonly macroButtons = new Map<string, { suite: SuiteId; macro: number; labelOverride: string; textSize: number }>()
-	readonly auxButtons = new Map<
-		string,
-		{ suite: SuiteId; aux: number; source: number; labelOverride: string; textSize: number }
-	>()
-	readonly crosspointButtons = new Map<
-		string,
-		{ suite: SuiteId; target: string; source: number; labelOverride: string; textSize: number }
-	>()
-	readonly imageStoreButtons = new Map<
-		string,
-		{ suite: SuiteId; output: number; image: number; labelOverride: string; textSize: number }
-	>()
-	readonly panelMemoryButtons = new Map<
-		string,
-		{ suite: SuiteId; register: number; labelOverride: string; textSize: number }
-	>()
-	readonly gpiButtons = new Map<string, { suite: SuiteId; gpi: number; labelOverride: string; textSize: number }>()
-	readonly ememButtons = new Map<
-		string,
-		{ suite: SuiteId; target: string; register: number; labelOverride: string; textSize: number }
-	>()
-	readonly transitionButtons = new Map<
-		string,
-		{ suite: SuiteId; target: string; transition: string; labelOverride: string; textSize: number }
-	>()
-	readonly suiteButtons = new Map<string, Map<string, { suite: SuiteId; textSize: number }>>()
+	readonly macroButtons = new ButtonAssignments<{
+		suite: SuiteId
+		macro: number
+		labelOverride: string
+		textSize: number
+		showSuite: boolean
+	}>()
+	readonly auxButtons = new ButtonAssignments<{
+		suite: SuiteId
+		aux: number
+		source: number
+		labelOverride: string
+		textSize: number
+		showSuite: boolean
+	}>()
+	readonly crosspointButtons = new ButtonAssignments<{
+		suite: SuiteId
+		target: string
+		source: number
+		labelOverride: string
+		textSize: number
+		showSuite: boolean
+	}>()
+	readonly imageStoreButtons = new ButtonAssignments<{
+		suite: SuiteId
+		output: number
+		image: number
+		labelOverride: string
+		textSize: number
+		showSuite: boolean
+	}>()
+	readonly panelMemoryButtons = new ButtonAssignments<{
+		suite: SuiteId
+		register: number
+		labelOverride: string
+		textSize: number
+		showSuite: boolean
+	}>()
+	readonly gpiButtons = new ButtonAssignments<{
+		suite: SuiteId
+		gpi: number
+		labelOverride: string
+		textSize: number
+		showSuite: boolean
+	}>()
+	readonly ememButtons = new ButtonAssignments<{
+		suite: SuiteId
+		target: string
+		register: number
+		labelOverride: string
+		textSize: number
+		showSuite: boolean
+	}>()
+	readonly transitionButtons = new ButtonAssignments<{
+		suite: SuiteId
+		target: string
+		transition: string
+		labelOverride: string
+		textSize: number
+		showSuite: boolean
+	}>()
+	readonly suiteButtons = new Map<string, Map<string, { suite: SuiteId; textSize: number; showSuite: boolean }>>()
 	private sourceRefreshTimer?: NodeJS.Timeout
 	private macroCatalogRefreshTimer?: NodeJS.Timeout
 	private macroFlashTimer?: NodeJS.Timeout
 	private timelineRefreshTimer?: NodeJS.Timeout
 	private transitionRefreshTimer?: NodeJS.Timeout
 	private timelinePulseTimer?: NodeJS.Timeout
+	private reportedStatus?: InstanceStatus
+	private automaticConnectChain: Promise<void> = Promise.resolve()
+	private readonly manuallyDisconnectedSuites = new Set<SuiteId>()
+	private readonly automaticConnectInProgress = new Set<SuiteId>()
+	private readonly automaticConnectQueued = new Set<SuiteId>()
+	private connectionConfigGeneration = 0
+	private shuttingDown = false
+	private readonly frameMacroStates = new Map<string, Map<number, number>>()
+	private readonly frameLastPlayedMacros = new Map<string, number>()
+	private readonly frameTimelineStates = new Map<string, string>()
+	private readonly frameTransitionStates = new Map<string, boolean>()
+	private readonly frameImageStoreStates = new Map<string, number>()
 	macroFlashOn = false
 	timelinePulsePhase = 0
 
@@ -105,6 +182,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.updatePresets() // export Presets
 		this.updateVariableDefinitions() // export variable definitions
 		this.updateRuntimeState()
+		this.queueSelectedSuiteCascade()
 		this.macroFlashTimer = setInterval(() => {
 			this.macroFlashOn = !this.macroFlashOn
 			this.checkFeedbacks('macro_button_state')
@@ -118,6 +196,13 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	}
 	// When module gets deleted
 	async destroy(): Promise<void> {
+		this.shuttingDown = true
+		this.connectionConfigGeneration++
+		this.manuallyDisconnectedSuites.clear()
+		for (const id of SUITES)
+			this.suiteStates[id] = { status: 'disconnected', frameVersion: '', protocolName: '', heartbeatFlash: false }
+		this.checkFeedbacks('connection_state')
+		this.updateRuntimeState()
 		for (const state of Object.values(this.suiteStates)) if (state.timer) clearTimeout(state.timer)
 		if (this.sourceRefreshTimer) clearTimeout(this.sourceRefreshTimer)
 		if (this.macroCatalogRefreshTimer) clearTimeout(this.macroCatalogRefreshTimer)
@@ -136,7 +221,10 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	}
 
 	async configUpdated(config: ModuleConfig): Promise<void> {
+		this.shuttingDown = true
+		this.connectionConfigGeneration++
 		this.config = config
+		this.manuallyDisconnectedSuites.clear()
 		if (this.sourceRefreshTimer) {
 			clearTimeout(this.sourceRefreshTimer)
 			this.sourceRefreshTimer = undefined
@@ -156,9 +244,11 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		await Promise.all(SUITES.map(async (id) => protocol.disconnectConnection(this.connectionId(id))))
 		for (const id of SUITES)
 			this.suiteStates[id] = { status: 'disconnected', frameVersion: '', protocolName: '', heartbeatFlash: false }
+		this.shuttingDown = false
 		this.updateActions()
 		this.updatePresets()
 		this.updateRuntimeState()
+		this.queueSelectedSuiteCascade()
 	}
 
 	private handleSourceNamesUpdated = (connectionId: string): void => {
@@ -172,18 +262,73 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		}, 100)
 	}
 
-	private handleAuxStateChanged = (connectionId: string): void => {
-		if (!SUITES.some((suite) => this.connectionId(suite) === connectionId)) return
+	private frameSuite(connectionId: string): SuiteId | undefined {
+		return SUITES.find((suite) => this.connectionId(suite) === connectionId)
+	}
+
+	private frameSource(connectionId: string, source: number): string {
+		const name = protocol.resolveSourceDisplayName(connectionId, source)
+		return name ? `${name} (${source})` : `Source ${source}`
+	}
+
+	private frameLog(connectionId: string, message: string): void {
+		const suite = this.frameSuite(connectionId)
+		if (suite) this.log('info', `FRAME Suite ${suiteNumber(suite)}: ${message}`)
+	}
+
+	private clearFrameLogState(connectionId: string): void {
+		this.frameMacroStates.delete(connectionId)
+		this.frameLastPlayedMacros.delete(connectionId)
+		this.frameTimelineStates.delete(connectionId)
+		for (const key of this.frameTransitionStates.keys())
+			if (key.startsWith(`${connectionId}:`)) this.frameTransitionStates.delete(key)
+		for (const key of this.frameImageStoreStates.keys())
+			if (key.startsWith(`${connectionId}:`)) this.frameImageStoreStates.delete(key)
+	}
+
+	private handleAuxStateChanged = (connectionId: string, data: unknown): void => {
+		if (!this.frameSuite(connectionId)) return
 		this.checkFeedbacks('aux_button_state')
+		if (data && typeof data === 'object' && 'origin' in data && data.origin === 'frame') {
+			const aux = Number('auxNum' in data ? data.auxNum : NaN)
+			const source = Number('currentSource' in data ? data.currentSource : NaN)
+			const previous = 'previousSource' in data ? data.previousSource : null
+			if (Number.isFinite(aux) && Number.isFinite(source) && previous !== null && previous !== undefined)
+				this.frameLog(connectionId, `AUX ${aux} changed to ${this.frameSource(connectionId, source)}`)
+		}
 	}
 
-	private handleMEStateChanged = (connectionId: string): void => {
-		if (!SUITES.some((suite) => this.connectionId(suite) === connectionId)) return
+	private handleMEStateChanged = (connectionId: string, data: unknown): void => {
+		if (!this.frameSuite(connectionId)) return
 		this.checkFeedbacks('crosspoint_button_state')
+		if (data && typeof data === 'object' && 'origin' in data && data.origin === 'frame') {
+			const address = Number('address' in data ? data.address : NaN)
+			const source = Number('currentSource' in data ? data.currentSource : NaN)
+			const previous = 'previousSource' in data ? data.previousSource : null
+			if (Number.isFinite(address) && Number.isFinite(source) && previous !== null && previous !== undefined)
+				this.frameLog(
+					connectionId,
+					`${'kind' in data && data.kind === 'keyer' ? 'Keyer' : 'Crosspoint'} address 0x${address.toString(16).padStart(2, '0')} changed to ${this.frameSource(connectionId, source)}`,
+				)
+		}
 	}
 
-	private handleTimelineStateChanged = (connectionId: string): void => {
-		if (!SUITES.some((suite) => this.connectionId(suite) === connectionId)) return
+	private handleTimelineStateChanged = (connectionId: string, data: unknown): void => {
+		if (!this.frameSuite(connectionId)) return
+		if (data && typeof data === 'object' && 'origin' in data && data.origin === 'frame') {
+			const run = Number('runState' in data ? data.runState : 0)
+			const pause = Number('pauseState' in data ? data.pauseState : 0)
+			const signature = `${run}:${pause}`
+			const previous = this.frameTimelineStates.get(connectionId)
+			if (previous !== signature) {
+				this.frameTimelineStates.set(connectionId, signature)
+				if (previous !== undefined)
+					this.frameLog(
+						connectionId,
+						pause > 0 ? 'Master timeline paused' : run > 0 ? 'Master timeline running' : 'Master timeline stopped',
+					)
+			}
+		}
 		if (this.timelineRefreshTimer) return
 		this.timelineRefreshTimer = setTimeout(() => {
 			this.timelineRefreshTimer = undefined
@@ -191,13 +336,39 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		}, 100)
 	}
 
-	private handleImageStoreStateChanged = (connectionId: string): void => {
-		if (!SUITES.some((suite) => this.connectionId(suite) === connectionId)) return
+	private handleImageStoreStateChanged = (connectionId: string, data: unknown): void => {
+		if (!this.frameSuite(connectionId)) return
 		this.checkFeedbacks('image_store_button_state')
+		if (data && typeof data === 'object' && 'origin' in data && data.origin === 'frame') {
+			const output = Number('output' in data ? data.output : NaN)
+			const image = Number('image' in data ? data.image : NaN)
+			if (Number.isFinite(output) && Number.isFinite(image)) {
+				const key = `${connectionId}:${output}`
+				if (this.frameImageStoreStates.has(key))
+					this.frameLog(connectionId, `Image Store output ${output} changed to image ${String(image).padStart(4, '0')}`)
+				this.frameImageStoreStates.set(key, image)
+			}
+		}
 	}
 
-	private handleTransitionTelemetryChanged = (connectionId: string): void => {
-		if (!SUITES.some((suite) => this.connectionId(suite) === connectionId)) return
+	private handleTransitionTelemetryChanged = (connectionId: string, data: unknown): void => {
+		if (!this.frameSuite(connectionId)) return
+		if (data && typeof data === 'object' && 'origin' in data && data.origin === 'frame') {
+			const did = Number('did' in data ? data.did : NaN)
+			const active = Boolean('active' in data && data.active)
+			const key = `${connectionId}:${did}`
+			const previous = this.frameTransitionStates.get(key)
+			if (Number.isFinite(did) && previous !== active) {
+				this.frameTransitionStates.set(key, active)
+				if (previous !== undefined || active) {
+					const direction = 'direction' in data && typeof data.direction === 'string' ? ` ${data.direction}` : ''
+					this.frameLog(
+						connectionId,
+						`Transition 0x${did.toString(16)} ${active ? `started${direction}` : 'completed'}`,
+					)
+				}
+			}
+		}
 		if (this.transitionRefreshTimer) return
 		this.transitionRefreshTimer = setTimeout(() => {
 			this.transitionRefreshTimer = undefined
@@ -222,6 +393,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			setTimeout(() => protocol.subscribeToMasterTimeline(protocolId), 600)
 			setTimeout(() => protocol.subscribeToImageStore(protocolId), 800)
 			setTimeout(() => protocol.subscribeToTransitionTelemetry(protocolId), 1000)
+			this.frameLog(connectionId, 'Connection established')
 		} else if (type === 'HEARTBEAT_ACK') {
 			state.heartbeatFlash = true
 			this.checkFeedbacks('connection_state')
@@ -242,12 +414,69 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 				this.macroCatalogRefreshTimer = undefined
 				this.updateActions()
 			}, 250)
+			const count = Object.keys(protocol.getMacroCatalog(connectionId) ?? {}).length
+			this.frameLog(connectionId, `Macro catalog received (${count} entries)`)
+		} else if (
+			type === 'MACRO_STATUS_CHANGED' &&
+			message &&
+			typeof message === 'object' &&
+			'origin' in message &&
+			message.origin === 'frame' &&
+			'macroStatus' in message &&
+			message.macroStatus &&
+			typeof message.macroStatus === 'object'
+		) {
+			const hasBaseline = this.frameMacroStates.has(connectionId)
+			const previous = this.frameMacroStates.get(connectionId) ?? new Map<number, number>()
+			const current = new Map<number, number>()
+			for (const [macroText, statusValue] of Object.entries(message.macroStatus)) {
+				const macro = Number(macroText)
+				const status = Number(statusValue)
+				if (Number.isFinite(macro) && Number.isFinite(status)) current.set(macro, status)
+			}
+			for (const [macro, status] of current) {
+				if (!hasBaseline) continue
+				if (previous.get(macro) === status) continue
+				const name = protocol.getMacroName(connectionId, macro)
+				this.frameLog(connectionId, `Macro ${macro}${name ? ` “${name}”` : ''} ${status === 7 ? 'paused' : 'playing'}`)
+			}
+			for (const macro of previous.keys()) {
+				if (!hasBaseline) continue
+				if (!current.has(macro)) {
+					const name = protocol.getMacroName(connectionId, macro)
+					this.frameLog(connectionId, `Macro ${macro}${name ? ` “${name}”` : ''} stopped`)
+				}
+			}
+			this.frameMacroStates.set(connectionId, current)
+			if ('lastPlayedMacro' in message) {
+				const macro = Number(message.lastPlayedMacro)
+				if (Number.isFinite(macro) && macro > 0 && this.frameLastPlayedMacros.get(connectionId) !== macro) {
+					this.frameLastPlayedMacros.set(connectionId, macro)
+					if (hasBaseline && !current.has(macro)) {
+						const name = protocol.getMacroName(connectionId, macro)
+						this.frameLog(connectionId, `Macro ${macro}${name ? ` “${name}”` : ''} played`)
+					}
+				}
+			}
 		} else if (type === 'FRAME_VERSION' && message && typeof message === 'object' && 'version' in message) {
 			state.frameVersion = String(message.version)
+			this.frameLog(connectionId, `Frame version ${state.frameVersion}`)
+		} else if (type === 'SUB_PARSE_ERROR') {
+			this.log('warn', `FRAME Suite ${suiteNumber(id)}: subscription parse error: ${String(message)}`)
 		} else if (['ERROR', 'DISCONNECTED', 'HANDSHAKE_TIMEOUT_ERROR', 'HEARTBEAT_TIMEOUT'].includes(type)) {
 			state.status = 'disconnected'
+			// Disconnect can be announced before protocol cleanup clears the catalog.
+			// Reuse the deferred definitions refresh so remaining suites supply labels.
+			if (type === 'DISCONNECTED' && !this.shuttingDown) this.handleSourceNamesUpdated(connectionId)
 			const detail = typeof message === 'string' ? message : type
 			this.log('warn', `Suite ${suiteNumber(id)}: ${detail}`)
+			if (
+				!this.shuttingDown &&
+				!this.automaticConnectInProgress.has(id) &&
+				!this.manuallyDisconnectedSuites.has(id) &&
+				this.isSuiteSelected(id)
+			)
+				this.queueAutomaticConnect(id)
 		} else if (type === 'CONNECTING' || type === 'HANDSHAKE_COMPLETE') {
 			state.status = 'connecting'
 			const detail = String(message).toLowerCase()
@@ -257,17 +486,21 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.updateRuntimeState()
 	}
 
-	async connectSuite(value: unknown): Promise<void> {
+	async connectSuite(value: unknown, automatic = false, automaticGeneration?: number): Promise<boolean> {
 		const id = suiteId(value)
 		const state = this.suiteStates[id]
+		if (!automatic) this.manuallyDisconnectedSuites.delete(id)
 		if (!this.config.host) {
 			this.updateStatus(InstanceStatus.BadConfig, 'Target IP is required')
-			return
+			return false
 		}
+		if (state.status === 'connected' || state.status === 'connecting') return true
 		state.status = 'connecting'
 		state.connectionPhase = 'establishing'
+		this.clearFrameLogState(this.connectionId(id))
 		this.updateRuntimeState()
 		try {
+			if (automatic) this.automaticConnectInProgress.add(id)
 			const [mainPort, listenerPort] = suitePorts(id)
 			await protocol.createConnection(
 				this.connectionId(id),
@@ -275,21 +508,105 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 				id,
 				{ mainPort, listenerPort },
 				`Suite ${suiteNumber(id)}`,
-				'2026.0.9.1',
-				'Aug 27 2026',
+				'2026.0.9.2',
+				'Oct 14 2026',
 			)
+			if (
+				this.shuttingDown ||
+				this.manuallyDisconnectedSuites.has(id) ||
+				(automaticGeneration !== undefined && automaticGeneration !== this.connectionConfigGeneration)
+			) {
+				await protocol.disconnectConnection(this.connectionId(id))
+				state.status = 'disconnected'
+				this.updateRuntimeState()
+				return false
+			}
+			const connected = await this.waitForSuiteConnection(id, 20000)
+			if (!connected && state.status !== 'disconnected') {
+				await protocol.disconnectConnection(this.connectionId(id))
+				state.status = 'disconnected'
+				this.updateRuntimeState()
+			}
+			return connected
 		} catch (error) {
 			state.status = 'disconnected'
 			this.log('warn', `Suite ${suiteNumber(id)}: ${String(error)}`)
 			this.updateRuntimeState()
+			return false
+		} finally {
+			this.automaticConnectInProgress.delete(id)
 		}
+	}
+
+	private async waitForSuiteConnection(id: SuiteId, timeoutMs: number): Promise<boolean> {
+		const deadline = Date.now() + timeoutMs
+		while (Date.now() < deadline) {
+			if (this.suiteStates[id].status === 'connected') return true
+			if (this.suiteStates[id].status === 'disconnected') return false
+			await new Promise((resolve) => setTimeout(resolve, 100))
+		}
+		return false
 	}
 
 	async disconnectSuite(value: unknown): Promise<void> {
 		const id = suiteId(value)
+		this.manuallyDisconnectedSuites.add(id)
 		await protocol.disconnectConnection(this.connectionId(id))
 		this.suiteStates[id] = { status: 'disconnected', frameVersion: '', protocolName: '', heartbeatFlash: false }
+		if (!this.shuttingDown) this.handleSourceNamesUpdated(this.connectionId(id))
 		this.updateRuntimeState()
+	}
+
+	private isSuiteSelected(id: SuiteId): boolean {
+		return suiteEnabled(this.config, suiteNumber(id))
+	}
+
+	private queueSelectedSuiteCascade(): void {
+		const selected = SUITES.filter((id) => this.isSuiteSelected(id))
+		const generation = this.connectionConfigGeneration
+		this.automaticConnectChain = this.automaticConnectChain.then(async () => {
+			for (const id of selected) {
+				if (generation !== this.connectionConfigGeneration) return
+				if (this.shuttingDown || !this.isSuiteSelected(id) || this.manuallyDisconnectedSuites.has(id)) continue
+				await this.connectAutomaticallyWithRetries(id, generation)
+			}
+		})
+	}
+
+	private queueAutomaticConnect(id: SuiteId): void {
+		if (this.automaticConnectQueued.has(id)) return
+		this.automaticConnectQueued.add(id)
+		const generation = this.connectionConfigGeneration
+		this.automaticConnectChain = this.automaticConnectChain.then(async () => {
+			try {
+				if (
+					generation !== this.connectionConfigGeneration ||
+					this.shuttingDown ||
+					!this.isSuiteSelected(id) ||
+					this.manuallyDisconnectedSuites.has(id)
+				)
+					return
+				await this.connectAutomaticallyWithRetries(id, generation)
+			} finally {
+				this.automaticConnectQueued.delete(id)
+			}
+		})
+	}
+
+	private async connectAutomaticallyWithRetries(id: SuiteId, generation: number): Promise<void> {
+		const retries = maximumRetries(this.config)
+		for (let attempt = 0; attempt <= retries; attempt++) {
+			if (
+				generation !== this.connectionConfigGeneration ||
+				this.shuttingDown ||
+				!this.isSuiteSelected(id) ||
+				this.manuallyDisconnectedSuites.has(id)
+			)
+				return
+			if (await this.connectSuite(id, true, generation)) return
+			if (attempt < retries) await new Promise((resolve) => setTimeout(resolve, 2000))
+		}
+		this.log('warn', `Suite ${suiteNumber(id)}: maximum reconnection attempts reached`)
 	}
 
 	send(command: () => CommandResult): void {
@@ -303,19 +620,24 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		macro: unknown,
 		labelOverride: unknown = '',
 		textSize: unknown = 100,
+		showSuite: unknown = true,
+		actionId: string = 'macro_play',
 	): void {
 		const targetSuite = suiteId(suite)
-		this.macroButtons.set(controlId, {
+		this.macroButtons.setAction(controlId, actionId, {
 			suite: targetSuite,
 			macro: Number(macro) || 1,
 			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
 			textSize: textScale(textSize),
+			showSuite: showSuite !== false,
 		})
+		this.trackSuiteButton(controlId, actionId, targetSuite, textSize, showSuite)
 		this.checkFeedbacks('macro_button_state')
 	}
 
-	untrackMacroButton(controlId: string): void {
-		this.macroButtons.delete(controlId)
+	untrackMacroButton(controlId: string, actionId: string = 'macro_play'): void {
+		this.macroButtons.deleteAction(controlId, actionId)
+		this.untrackSuiteButton(controlId, actionId)
 		this.checkFeedbacks('macro_button_state')
 	}
 
@@ -326,16 +648,19 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		source: unknown,
 		labelOverride: unknown = '',
 		textSize: unknown = 100,
+		showSuite: unknown = true,
+		actionId: string = 'aux_route',
 	): void {
 		const targetSuite = suiteId(suite)
-		this.auxButtons.set(controlId, {
+		this.auxButtons.setAction(controlId, actionId, {
 			suite: targetSuite,
 			aux: Number(aux) || 1,
 			source: Number(source) || 1,
 			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
 			textSize: textScale(textSize),
+			showSuite: showSuite !== false,
 		})
-		this.trackSuiteButton(controlId, 'aux_route', targetSuite, textSize)
+		this.trackSuiteButton(controlId, actionId, targetSuite, textSize, showSuite)
 		this.checkFeedbacks('aux_button_state')
 	}
 
@@ -346,28 +671,31 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		source: unknown,
 		labelOverride: unknown = '',
 		textSize: unknown = 100,
+		showSuite: unknown = true,
+		actionId: string = 'crosspoint',
 	): void {
 		const targetSuite = suiteId(suite)
-		this.crosspointButtons.set(controlId, {
+		this.crosspointButtons.setAction(controlId, actionId, {
 			suite: targetSuite,
 			target: String(target),
 			source: Number(source) || 1,
 			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
 			textSize: textScale(textSize),
+			showSuite: showSuite !== false,
 		})
-		this.trackSuiteButton(controlId, 'crosspoint', targetSuite, textSize)
+		this.trackSuiteButton(controlId, actionId, targetSuite, textSize, showSuite)
 		this.checkFeedbacks('crosspoint_button_state')
 	}
 
-	untrackCrosspointButton(controlId: string): void {
-		this.crosspointButtons.delete(controlId)
-		this.untrackSuiteButton(controlId, 'crosspoint')
+	untrackCrosspointButton(controlId: string, actionId: string = 'crosspoint'): void {
+		this.crosspointButtons.deleteAction(controlId, actionId)
+		this.untrackSuiteButton(controlId, actionId)
 		this.checkFeedbacks('crosspoint_button_state')
 	}
 
-	untrackAuxButton(controlId: string): void {
-		this.auxButtons.delete(controlId)
-		this.untrackSuiteButton(controlId, 'aux_route')
+	untrackAuxButton(controlId: string, actionId: string = 'aux_route'): void {
+		this.auxButtons.deleteAction(controlId, actionId)
+		this.untrackSuiteButton(controlId, actionId)
 		this.checkFeedbacks('aux_button_state')
 	}
 
@@ -378,22 +706,25 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		image: unknown,
 		labelOverride: unknown = '',
 		textSize: unknown = 100,
+		showSuite: unknown = true,
+		actionId: string = 'image_store',
 	): void {
 		const targetSuite = suiteId(suite)
-		this.imageStoreButtons.set(controlId, {
+		this.imageStoreButtons.setAction(controlId, actionId, {
 			suite: targetSuite,
 			output: Number(output) || 1,
 			image: Number(image) || 1,
 			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
 			textSize: textScale(textSize),
+			showSuite: showSuite !== false,
 		})
-		this.trackSuiteButton(controlId, 'image_store', targetSuite, textSize)
+		this.trackSuiteButton(controlId, actionId, targetSuite, textSize, showSuite)
 		this.checkFeedbacks('image_store_button_state')
 	}
 
-	untrackImageStoreButton(controlId: string): void {
-		this.imageStoreButtons.delete(controlId)
-		this.untrackSuiteButton(controlId, 'image_store')
+	untrackImageStoreButton(controlId: string, actionId: string = 'image_store'): void {
+		this.imageStoreButtons.deleteAction(controlId, actionId)
+		this.untrackSuiteButton(controlId, actionId)
 		this.checkFeedbacks('image_store_button_state')
 	}
 
@@ -403,21 +734,24 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		register: unknown,
 		labelOverride: unknown = '',
 		textSize: unknown = 100,
+		showSuite: unknown = true,
+		actionId: string = 'panel_memory',
 	): void {
 		const targetSuite = suiteId(suite)
-		this.panelMemoryButtons.set(controlId, {
+		this.panelMemoryButtons.setAction(controlId, actionId, {
 			suite: targetSuite,
 			register: Number(register) || 1,
 			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
 			textSize: textScale(textSize),
+			showSuite: showSuite !== false,
 		})
-		this.trackSuiteButton(controlId, 'panel_memory', targetSuite, textSize)
+		this.trackSuiteButton(controlId, actionId, targetSuite, textSize, showSuite)
 		this.checkFeedbacks('panel_memory_button_state')
 	}
 
-	untrackPanelMemoryButton(controlId: string): void {
-		this.panelMemoryButtons.delete(controlId)
-		this.untrackSuiteButton(controlId, 'panel_memory')
+	untrackPanelMemoryButton(controlId: string, actionId: string = 'panel_memory'): void {
+		this.panelMemoryButtons.deleteAction(controlId, actionId)
+		this.untrackSuiteButton(controlId, actionId)
 		this.checkFeedbacks('panel_memory_button_state')
 	}
 
@@ -427,21 +761,24 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		gpi: unknown,
 		labelOverride: unknown = '',
 		textSize: unknown = 100,
+		showSuite: unknown = true,
+		actionId: string = 'gpi',
 	): void {
 		const targetSuite = suiteId(suite)
-		this.gpiButtons.set(controlId, {
+		this.gpiButtons.setAction(controlId, actionId, {
 			suite: targetSuite,
 			gpi: Number(gpi) || 1,
 			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
 			textSize: textScale(textSize),
+			showSuite: showSuite !== false,
 		})
-		this.trackSuiteButton(controlId, 'gpi', targetSuite, textSize)
+		this.trackSuiteButton(controlId, actionId, targetSuite, textSize, showSuite)
 		this.checkFeedbacks('gpi_button_state')
 	}
 
-	untrackGpiButton(controlId: string): void {
-		this.gpiButtons.delete(controlId)
-		this.untrackSuiteButton(controlId, 'gpi')
+	untrackGpiButton(controlId: string, actionId: string = 'gpi'): void {
+		this.gpiButtons.deleteAction(controlId, actionId)
+		this.untrackSuiteButton(controlId, actionId)
 		this.checkFeedbacks('gpi_button_state')
 	}
 
@@ -452,22 +789,25 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		transition: unknown,
 		labelOverride: unknown = '',
 		textSize: unknown = 100,
+		showSuite: unknown = true,
+		actionId: string = 'transition',
 	): void {
 		const targetSuite = suiteId(suite)
-		this.transitionButtons.set(controlId, {
+		this.transitionButtons.setAction(controlId, actionId, {
 			suite: targetSuite,
 			target: String(target),
 			transition: String(transition),
 			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
 			textSize: textScale(textSize),
+			showSuite: showSuite !== false,
 		})
-		this.trackSuiteButton(controlId, 'transition', targetSuite, textSize)
+		this.trackSuiteButton(controlId, actionId, targetSuite, textSize, showSuite)
 		this.checkFeedbacks('transition_button_state')
 	}
 
-	untrackTransitionButton(controlId: string): void {
-		this.transitionButtons.delete(controlId)
-		this.untrackSuiteButton(controlId, 'transition')
+	untrackTransitionButton(controlId: string, actionId: string = 'transition'): void {
+		this.transitionButtons.deleteAction(controlId, actionId)
+		this.untrackSuiteButton(controlId, actionId)
 		this.checkFeedbacks('transition_button_state')
 	}
 
@@ -478,30 +818,54 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		register: unknown,
 		labelOverride: unknown = '',
 		textSize: unknown = 100,
+		showSuite: unknown = true,
+		actionId: string = 'emem',
 	): void {
 		const targetSuite = suiteId(suite)
-		this.ememButtons.set(controlId, {
+		this.ememButtons.setAction(controlId, actionId, {
 			suite: targetSuite,
 			target: String(target),
 			register: Number(register) || 0,
 			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
 			textSize: textScale(textSize),
+			showSuite: showSuite !== false,
 		})
-		this.trackSuiteButton(controlId, 'emem', targetSuite, textSize)
+		this.trackSuiteButton(controlId, actionId, targetSuite, textSize, showSuite)
 		this.checkFeedbacks('emem_button_state')
 	}
 
-	untrackEmemButton(controlId: string): void {
-		this.ememButtons.delete(controlId)
-		this.untrackSuiteButton(controlId, 'emem')
+	untrackEmemButton(controlId: string, actionId: string = 'emem'): void {
+		this.ememButtons.deleteAction(controlId, actionId)
+		this.untrackSuiteButton(controlId, actionId)
 		this.checkFeedbacks('emem_button_state')
 	}
 
-	trackSuiteButton(controlId: string, actionId: string, suite: unknown, textSize: unknown = 100): void {
-		const actions = this.suiteButtons.get(controlId) ?? new Map<string, { suite: SuiteId; textSize: number }>()
-		actions.set(actionId, { suite: suiteId(suite), textSize: textScale(textSize) })
+	trackSuiteButton(
+		controlId: string,
+		actionId: string,
+		suite: unknown,
+		textSize: unknown = 100,
+		showSuite: unknown = true,
+	): void {
+		const actions =
+			this.suiteButtons.get(controlId) ?? new Map<string, { suite: SuiteId; textSize: number; showSuite: boolean }>()
+		actions.set(actionId, { suite: suiteId(suite), textSize: textScale(textSize), showSuite: showSuite !== false })
 		this.suiteButtons.set(controlId, actions)
 		this.checkFeedbacks('suite_badge')
+	}
+
+	showSuiteDot(controlId: string, actionType: string): boolean {
+		const assignments: Record<string, Map<string, { showSuite: boolean }>> = {
+			macro_play: this.macroButtons,
+			aux_route: this.auxButtons,
+			crosspoint: this.crosspointButtons,
+			image_store: this.imageStoreButtons,
+			panel_memory: this.panelMemoryButtons,
+			gpi: this.gpiButtons,
+			transition: this.transitionButtons,
+			emem: this.ememButtons,
+		}
+		return assignments[actionType]?.get(controlId)?.showSuite !== false
 	}
 
 	untrackSuiteButton(controlId: string, actionId: string): void {
@@ -515,13 +879,22 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 
 	private updateRuntimeState(): void {
 		const statuses = Object.values(this.suiteStates).map((state) => state.status)
-		this.updateStatus(
-			statuses.includes('connected')
-				? InstanceStatus.Ok
-				: statuses.includes('connecting')
-					? InstanceStatus.Connecting
-					: InstanceStatus.Disconnected,
-		)
+		const status = statuses.includes('connected')
+			? InstanceStatus.Ok
+			: statuses.includes('connecting')
+				? InstanceStatus.Connecting
+				: InstanceStatus.Disconnected
+		if (status !== this.reportedStatus) {
+			this.reportedStatus = status
+			this.updateStatus(
+				status,
+				status === InstanceStatus.Ok
+					? 'Suite connected'
+					: status === InstanceStatus.Connecting
+						? 'Connecting to suite'
+						: 'No suites connected',
+			)
+		}
 		this.setVariableValues(
 			Object.fromEntries(
 				SUITES.flatMap((id) => {

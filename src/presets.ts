@@ -521,8 +521,14 @@ export function UpdatePresets(self: ModuleInstance): void {
 	}
 	for (const preset of Object.values(presets)) {
 		if (!preset || preset.type !== 'simple') continue
+		// Companion converts `show_topbar: false` to the layered-button
+		// "Border when pressed" decoration for newly created preset buttons.
+		preset.style.show_topbar = false
 		for (const step of preset.steps) {
-			for (const action of [...step.down, ...step.up]) action.options.textSize ??= 100
+			for (const action of [...step.down, ...step.up]) {
+				action.options.textSize ??= 100
+				action.options.showSuite ??= true
+			}
 		}
 	}
 	self.setPresetDefinitions(structure, presets)

@@ -5,6 +5,11 @@ const SUITE_NUMBER_PATHS: Record<number, string> = {
 	4: 'M46 339 L46 304 L27 327 L52 327',
 }
 
+// Full-button SVG overlays are centered by Companion, unlike the standalone
+// badge used by macro buttons. Offset their badge left so every action lands
+// on the macro button's lower-left reference position.
+const LABELED_BADGE_X = -7
+
 const badgeSvg = (suite: number): string => `
 <svg xmlns="http://www.w3.org/2000/svg" width="360" height="360" viewBox="0 0 360 360">
 	<g transform="translate(24 -24)">
@@ -29,6 +34,7 @@ export const labeledButtonSvg = (
 	color: number,
 	transition?: { ramp: number; active: boolean },
 	textScale = 1,
+	showSuite = true,
 ): string => {
 	const textColor = `#${color.toString(16).padStart(6, '0')}`
 	const scale = Math.max(0.5, Math.min(2, textScale))
@@ -40,6 +46,12 @@ export const labeledButtonSvg = (
 	const transitionStrip = transition?.active
 		? `<rect x="325" y="${(316 - transitionHeight).toFixed(2)}" width="30" height="${transitionHeight.toFixed(2)}" rx="3" fill="#98e700" stroke="#315f00" stroke-width="5"/>`
 		: ''
+	const suiteBadge = showSuite
+		? `<g transform="translate(${LABELED_BADGE_X} -24)">
+		<circle cx="38" cy="322" r="31" fill="#050505" stroke="#00cfd5" stroke-width="6"/>
+		<path d="${SUITE_NUMBER_PATHS[suite]}" fill="none" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+	</g>`
+		: ''
 	return Buffer.from(
 		`
 <svg xmlns="http://www.w3.org/2000/svg" width="360" height="360" viewBox="0 0 360 360">
@@ -48,10 +60,7 @@ export const labeledButtonSvg = (
 		<text x="180" y="190" font-size="${sourceSize}" dominant-baseline="middle"${sourceWidthLimit}>${escapeXml(source)}</text>
 	</g>
 	${transitionStrip}
-	<g transform="translate(24 -24)">
-		<circle cx="38" cy="322" r="31" fill="#050505" stroke="#00cfd5" stroke-width="6"/>
-		<path d="${SUITE_NUMBER_PATHS[suite]}" fill="none" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
-	</g>
+	${suiteBadge}
 </svg>`,
 	).toString('base64')
 }
@@ -63,6 +72,7 @@ export const timelineProgressSvg = (
 	paused: boolean,
 	phase: number,
 	pausePoints: number[],
+	showSuite = true,
 ): string => {
 	const progress = Math.max(0, Math.min(1, duration > 0 ? cursorTime / duration : 0))
 	const dotX = 48 + progress * 264
@@ -90,6 +100,12 @@ export const timelineProgressSvg = (
 		.join('')
 	const dotFill = paused ? '#ff8c00' : '#98e700'
 	const dotStroke = paused ? '#b84a00' : '#4c7300'
+	const suiteBadge = showSuite
+		? `<g transform="translate(${LABELED_BADGE_X} -24)">
+		<circle cx="38" cy="322" r="31" fill="#050505" stroke="#00cfd5" stroke-width="6"/>
+		<path d="${SUITE_NUMBER_PATHS[suite]}" fill="none" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+	</g>`
+		: ''
 	return Buffer.from(
 		`
 <svg xmlns="http://www.w3.org/2000/svg" width="360" height="360" viewBox="0 0 360 360">
@@ -98,10 +114,7 @@ export const timelineProgressSvg = (
 	${pauseDiamonds}
 	${rings}
 	<circle cx="${dotX.toFixed(2)}" cy="${trackY}" r="${dotRadius.toFixed(2)}" fill="${dotFill}" stroke="${dotStroke}" stroke-width="6"/>
-	<g transform="translate(24 -24)">
-		<circle cx="38" cy="322" r="31" fill="#050505" stroke="#00cfd5" stroke-width="6"/>
-		<path d="${SUITE_NUMBER_PATHS[suite]}" fill="none" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
-	</g>
+	${suiteBadge}
 </svg>`,
 	).toString('base64')
 }

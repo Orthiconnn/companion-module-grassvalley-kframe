@@ -34,6 +34,7 @@ class HandshakeConnection {
         this.announcedTargetPort = 0;
         this.mainHandshakeStage = 1;
         this.isClosing = false;
+        this.startupAbort = new AbortController();
         
         // Timers and intervals
         this.heartbeatIntervalId = null;
@@ -65,6 +66,7 @@ class HandshakeConnection {
         this.subscriptionDataPort = 0;       // Port the frame uses to send subscription data to listener
 
         // ME bus subscription state
+        this.keyerState = new Map(); // Keyer source selections; separate from A-D bus state.
         this.meState = new Map();            // address byte -> currentSourceNum
         this.subscribedMEs = new Set();      // Tracking set (like subscribedAuxes)
         this.meSubscriptionIds = new Map();  // subscriptionId -> address byte
@@ -104,6 +106,7 @@ class HandshakeConnection {
         // Macro catalog state (TCP/V16+ only)
         this.macroCatalog = new Map();        // macroNumber (1-999) -> { oled, panel, comment }
         this.macroCatalogReady = false;       // True after bulk load complete
+        this.lastPublishedMacroCatalog = null;
         this.macroCatalogBulkTimerId = null;  // Timer for detecting bulk load completion
         this.macroCatalogSubscribed = false;  // Whether we've sent the subscribe packet
         this.macroCatalogDataSeen = false;    // Set true after first valid macro data arrives
@@ -290,15 +293,26 @@ class HandshakeConnection {
         return candidateId;
     }
     
+    throwIfClosing() {
+        if (this.isClosing) {
+            const error = new Error('Connection startup cancelled');
+            error.name = 'AbortError';
+            throw error;
+        }
+    }
+
     // Start the connection process - auto-detects TCP (V16+) or UDP (V14)
     async start() {
+        this.throwIfClosing();
         await this.loadAuxState();
+        this.throwIfClosing();
 
         this.emitter.emit('status', 'CONNECTING', 'Detecting protocol...');
 
         // Try TCP first (V16+/V18 detection)
         try {
             const tcpConnected = await this.tryTcpConnect();
+            this.throwIfClosing();
             if (tcpConnected) {
                 this.protocol = 'tcp';
                 const result = await this.startTcp();
@@ -310,6 +324,7 @@ class HandshakeConnection {
         } catch (e) {
         }
 
+        this.throwIfClosing();
         // Fall back to UDP (V14)
         this.protocol = 'udp';
         return await this.startUdp();
@@ -317,8 +332,10 @@ class HandshakeConnection {
 
     // Try TCP connect to port 5000 with timeout, binding to suite listener port
     tryTcpConnect() {
+        this.throwIfClosing();
         return new Promise((resolve, reject) => {
             const sock = new net.Socket();
+            this.tcpSocket = sock; // Cleanup must own the socket during detection too.
             let settled = false;
 
             const timer = setTimeout(() => {
@@ -335,6 +352,14 @@ class HandshakeConnection {
                     clearTimeout(timer);
                     sock.destroy();
                     reject(err);
+                }
+            });
+
+            sock.once('close', () => {
+                if (!settled) {
+                    settled = true;
+                    clearTimeout(timer);
+                    reject(new Error('TCP detection socket closed'));
                 }
             });
 
@@ -501,6 +526,7 @@ class HandshakeConnection {
 
     // Start TCP path (V16+/V18). Returns cleanup closure on success, false on auth failure.
     async startTcp() {
+        this.throwIfClosing();
         this.emitter.emit('status', 'CONNECTING', 'TCP Authentication...');
 
         // K-Frame Menu waits ~1s after TCP connect before AUTH1 (capture-confirmed;
@@ -512,6 +538,7 @@ class HandshakeConnection {
 
         // Wait for a complete framed AUTH response (3s matches engine.py:1184-1185)
         const authOk = await this.tcpWaitForFrame(3000);
+        this.throwIfClosing();
 
         if (!authOk) {
             this.abortTcpAttempt('No framed AUTH response within 3s');
@@ -724,6 +751,8 @@ class HandshakeConnection {
     }
 
     tcpWaitForFrame(timeoutMs) {
+        this.throwIfClosing();
+        const socket = this.tcpSocket;
         return new Promise((resolve) => {
             let settled = false;
             let timer = null;
@@ -734,11 +763,11 @@ class HandshakeConnection {
                 if (settled) return;
                 settled = true;
                 if (timer) clearTimeout(timer);
-                if (this.tcpSocket) {
-                    if (onData) this.tcpSocket.removeListener('data', onData);
+                if (socket) {
+                    if (onData) socket.removeListener('data', onData);
                     if (onFail) {
-                        this.tcpSocket.removeListener('error', onFail);
-                        this.tcpSocket.removeListener('close', onFail);
+                        socket.removeListener('error', onFail);
+                        socket.removeListener('close', onFail);
                     }
                 }
                 resolve(val);
@@ -764,13 +793,14 @@ class HandshakeConnection {
             onFail = () => settle(false);
             timer = setTimeout(() => settle(false), timeoutMs);
 
-            this.tcpSocket.on('data', onData);
-            this.tcpSocket.on('error', onFail);
-            this.tcpSocket.on('close', onFail);
+            socket.on('data', onData);
+            socket.on('error', onFail);
+            socket.on('close', onFail);
         });
     }
 
     abortTcpAttempt(reason) {
+        this.throwIfClosing();
         this.emitter.emit('status', 'TCP_AUTH_FAILED', reason);
         if (this.tcpSocket) {
             this.tcpSocket.removeAllListeners();
@@ -779,7 +809,6 @@ class HandshakeConnection {
         }
         this.tcpBuffer = Buffer.alloc(0);
         this.tcpAuthPayload = null;
-        this.isClosing = false;
         this.mainHandshakeStage = 1;
         this.fullyConnected = false;
     }
@@ -803,8 +832,22 @@ class HandshakeConnection {
         }
     }
 
-    sleep(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
+    async sleep(ms) {
+        this.throwIfClosing();
+        await new Promise((resolve, reject) => {
+            const signal = this.startupAbort.signal;
+            const cancel = () => {
+                clearTimeout(timer);
+                signal.removeEventListener('abort', cancel);
+                reject(new Error('Connection startup cancelled'));
+            };
+            const timer = setTimeout(() => {
+                signal.removeEventListener('abort', cancel);
+                resolve();
+            }, ms);
+            signal.addEventListener('abort', cancel, { once: true });
+        });
+        this.throwIfClosing();
     }
 
     // Subscribe to macro catalog (works on both TCP/V16+ and UDP/V14)
@@ -1097,6 +1140,7 @@ class HandshakeConnection {
         if (changed) {
             this.runSeq++;
             this.emitter.emit('status', 'MACRO_STATUS_CHANGED', {
+                origin: 'frame',
                 macroStatus: Object.fromEntries(this.macroStatus),
                 lastPlayedMacro: this.lastPlayedMacro,
                 runSeq: this.runSeq
@@ -1323,22 +1367,27 @@ let found = 0;
         if (this.macroCatalogBulkTimerId) {
             clearTimeout(this.macroCatalogBulkTimerId);
         }
-        // After 2 seconds of no new macro data, consider bulk load complete
+        // Publish the initial catalog and subsequent changed batches after a quiet
+        // period. Readiness remains true; repeated identical dumps need no UI refresh.
         this.macroCatalogBulkTimerId = setTimeout(() => {
-            if (!this.macroCatalogReady && !this.isClosing) {
-                this.macroCatalogReady = true;
-                const namedCount = this.macroCatalog.size;
-                this.stopMacroCatalogRetryLoop();
+            this.macroCatalogBulkTimerId = null;
+            if (this.isClosing) return;
+            const catalog = Object.fromEntries(this.macroCatalog);
+            const snapshot = JSON.stringify(catalog);
+            this.macroCatalogReady = true;
+            this.stopMacroCatalogRetryLoop();
+            if (snapshot !== this.lastPublishedMacroCatalog) {
+                this.lastPublishedMacroCatalog = snapshot;
                 this.emitter.emit('status', 'MACRO_CATALOG_READY', {
-                    totalNamed: namedCount,
-                    catalog: Object.fromEntries(this.macroCatalog)
+                    totalNamed: this.macroCatalog.size,
+                    catalog
                 });
+            }
 
-                // V14 UDP: defer macro status subscribe until catalog dump settles
-                // (TCP already subscribed immediately — see startTcpConnection)
-                if (this.protocol === 'udp' && !this.macroStatusSubscribed) {
-                    this.subscribeMacroStatus();
-                }
+            // V14 UDP: subscribe once after the initial dump settles. Later catalog
+            // updates must not clear or restart the existing macro-status subscription.
+            if (this.protocol === 'udp' && !this.macroStatusSubscribed) {
+                this.subscribeMacroStatus();
             }
         }, 2000);
     }
@@ -1357,30 +1406,47 @@ let found = 0;
 
     // Start UDP path (V14) - original handshake process
     async startUdp() {
+        this.throwIfClosing();
         this.mainClient = dgram.createSocket('udp4');
         this.listenerClient = dgram.createSocket('udp4');
 
-        this.setupMainClientHandlers();
-        this.setupListenerClientHandlers();
-
         return new Promise((resolve, reject) => {
-            let resolved = false;
+            let settled = false;
+            const signal = this.startupAbort.signal;
+            const finish = (error) => {
+                if (settled) return;
+                settled = true;
+                signal.removeEventListener('abort', cancel);
+                this.mainClient.removeListener('error', onError);
+                this.listenerClient.removeListener('error', onError);
+                if (error) reject(error);
+                else resolve(() => this.cleanup());
+            };
+            const cancel = () => finish(new Error('Connection startup cancelled'));
+            const onError = (error) => finish(error);
+            signal.addEventListener('abort', cancel, { once: true });
+            this.mainClient.once('error', onError);
+            this.listenerClient.once('error', onError);
+            this.setupMainClientHandlers();
+            this.setupListenerClientHandlers();
 
             this.mainClient.bind(this.mainClientPort, () => {
+                if (this.isClosing) { this.cleanup(); return; }
                 this.listenerClient.bind(this.listenerClientPort, () => {
+                    if (this.isClosing) { this.cleanup(); return; }
                     this.emitter.emit('status', 'CONNECTING', 'Starting Initial Handshake...');
+                    if (this.isClosing) { this.cleanup(); return; }
                     this.mainClient.send(this.payloadPacket1, this.initialServerPort, this.targetHost, (err) => {
+                        if (this.isClosing) { this.cleanup(); return; }
                         if (err) {
+                            finish(err);
                             this.emitter.emit('status', 'ERROR', `Error sending Packet 1: ${err.message}`);
-                            reject(err);
+                            this.cleanup();
                         } else {
                             this.mainHandshakeStage = 2;
                             this.startPacket1RetryTimer();
                             this.startHandshakeTimeout();
-                            if (!resolved) {
-                                resolved = true;
-                                resolve(() => this.cleanup());
-                            }
+                            finish();
                         }
                     });
                 });
@@ -1665,12 +1731,16 @@ let found = 0;
     }
     
     cleanup() {
-        if (this.isClosing) return;
+        const alreadyClosing = this.isClosing;
         this.isClosing = true;
+        this.startupAbort.abort();
         this.fullyConnected = false; // Reset fully connected flag
         this.frameVersion = null;    // Reset frame version
+        // Clear before DISCONNECTED so refreshed labels cannot use this frame's old names.
+        this.sourceNames.clear();
         this.macroCatalog.clear();   // Clear macro catalog
         this.macroCatalogReady = false;
+        this.lastPublishedMacroCatalog = null;
         this.macroCatalogSubscribed = false;
         this.macroCatalogDataSeen = false;
         this.macroCatalogSubscribeAttempts = 0;
@@ -1678,7 +1748,7 @@ let found = 0;
         this.stopMacroCatalogRetryLoop();
         this.macroStatus.clear();
         this.lastPlayedMacro = null;
-        this.runSeq++;
+        if (!alreadyClosing) this.runSeq++;
         this.macroStatusSubscribed = false;
         if (this.macroStatusDeferTimerId) {
             clearTimeout(this.macroStatusDeferTimerId);
@@ -1689,6 +1759,7 @@ let found = 0;
         this.auxState.clear();        // Clear cached AUX state
         this.subscribedMEs.clear();   // Reset ME subscription tracking
         this.meState.clear();         // Clear cached ME state
+        this.keyerState.clear();
         this.timelineSubscriptionIds.clear();
         this.timelineSubscribed = false;
         this.timelineState = { cursorTime: null, duration: null, pauseState: 0, runState: null, pausePoints: [] };
@@ -1700,7 +1771,7 @@ let found = 0;
         this.transitionTelemetry.clear();
         this.transitionSubscriptionIds.clear();
         this.transitionTelemetrySubscribed = false;
-        this.emitter.emit('status', 'DISCONNECTED', 'Closing connection...');
+        if (!alreadyClosing) this.emitter.emit('status', 'DISCONNECTED', 'Closing connection...');
 
         if (this.heartbeatIntervalId) clearInterval(this.heartbeatIntervalId);
         if (this.packet1RetryIntervalId) clearInterval(this.packet1RetryIntervalId);
@@ -1717,22 +1788,10 @@ let found = 0;
             }
         } catch (e) { /* Ignore */ }
 
-        // Close UDP sockets
-        try {
-            if (this.mainClient && typeof this.mainClient.address === 'function') {
-                try {
-                    if (this.mainClient.address()) this.mainClient.close();
-                } catch (e) { /* Ignore */ }
-            }
-        } catch (e) { /* Ignore */ }
-
-        try {
-            if (this.listenerClient && typeof this.listenerClient.address === 'function') {
-                try {
-                    if (this.listenerClient.address()) this.listenerClient.close();
-                } catch (e) { /* Ignore */ }
-            }
-        } catch (e) { /* Ignore */ }
+        // Also close sockets still binding; repeated cleanup must remain safe.
+        for (const socket of [this.mainClient, this.listenerClient]) {
+            try { socket?.close(); } catch (e) { /* Already closed or never bound. */ }
+        }
     }
     
     // Build a 4-byte ACK: 0x0002 + echoed sequence bytes [2..3] from the inbound packet.
@@ -1821,6 +1880,7 @@ let found = 0;
                 this.macroStatus.clear();
                 this.runSeq++;
                 this.emitter.emit('status', 'MACRO_STATUS_CHANGED', {
+                    origin: 'local',
                     macroStatus: Object.fromEntries(this.macroStatus),
                     lastPlayedMacro: this.lastPlayedMacro,
                     runSeq: this.runSeq
@@ -1918,6 +1978,7 @@ let found = 0;
         if (changed) {
             this.runSeq++;
             this.emitter.emit('status', 'MACRO_STATUS_CHANGED', {
+                origin: 'local',
                 macroStatus: Object.fromEntries(this.macroStatus),
                 lastPlayedMacro: this.lastPlayedMacro,
                 runSeq: this.runSeq
@@ -1962,6 +2023,7 @@ let found = 0;
                     this.auxState.set(auxNum, sourceNum);
                     if (previousSource !== sourceNum) {
                         this.emitter.emit('auxStateChanged', {
+                            origin: 'local',
                             auxNum,
                             previousSource,
                             currentSource: sourceNum
@@ -2002,7 +2064,7 @@ let found = 0;
                     this.emitter.emit('status', 'ERROR', `Error sending image store: ${err.message}`);
                 } else {
                     this.imageStoreState.set(outputNum, imageNum);
-                    this.emitter.emit('imageStoreStateChanged', { output: outputNum, image: imageNum });
+                    this.emitter.emit('imageStoreStateChanged', { origin: 'local', output: outputNum, image: imageNum });
                     this.emitter.emit('status', 'IMAGE_STORE_SENT', `Output ${outputNum} -> Image ${imageNum}`);
                 }
             });
@@ -2146,8 +2208,8 @@ let found = 0;
         if (pid !== 0x104A && pid !== 0x103A) {
             return { success: false, message: 'Invalid crosspoint PID.' };
         }
-        if (typeof sourceNum !== 'number' || sourceNum < 1 || sourceNum > 809) {
-            return { success: false, message: 'Invalid source number (must be 1-809).' };
+        if (!Number.isInteger(sourceNum) || sourceNum < 1 || sourceNum > 809) {
+            return { success: false, message: 'Invalid source number (must be a whole number from 1-809).' };
         }
         try {
             const data = Buffer.alloc(2);
@@ -2157,15 +2219,20 @@ let found = 0;
                 if (err) {
                     this.emitter.emit('status', 'ERROR', `Error sending crosspoint: ${err.message}`);
                 } else {
-                    const address = did & 0xff;
-                    const previousSource = this.meState.get(address) || null;
-                    this.meState.set(address, sourceNum);
-                    if (previousSource !== sourceNum) {
-                        this.emitter.emit('meStateChanged', {
-                            address,
-                            previousSource,
-                            currentSource: sourceNum
-                        });
+                    // meState contains only A-D buses (PID 0x104A). Keyer DIDs
+                    // share their low byte, so PID 0x103A must not update this cache.
+                    if (pid === 0x104A) {
+                        const address = did & 0xff;
+                        const previousSource = this.meState.get(address) || null;
+                        this.meState.set(address, sourceNum);
+                        if (previousSource !== sourceNum) {
+                            this.emitter.emit('meStateChanged', {
+                                origin: 'local',
+                                address,
+                                previousSource,
+                                currentSource: sourceNum
+                            });
+                        }
                     }
                     this.emitter.emit('status', 'CROSSPOINT_SENT', `PID 0x${pid.toString(16)} DID 0x${did.toString(16)} src ${sourceNum}`);
                 }
@@ -2436,7 +2503,7 @@ let found = 0;
 
         if (this.timelineState[expected.key] !== value) {
             this.timelineState[expected.key] = value;
-            this.emitter.emit('timelineStateChanged', { ...this.timelineState });
+            this.emitter.emit('timelineStateChanged', { origin: 'frame', ...this.timelineState });
         }
         return true;
     }
@@ -2480,7 +2547,7 @@ let found = 0;
                 .map((item) => item.time)
                 .sort((a, b) => a - b);
             this.timelineState.pausePoints = [...new Set(pausePoints)];
-            this.emitter.emit('timelineStateChanged', { ...this.timelineState, pausePoints: [...this.timelineState.pausePoints] });
+            this.emitter.emit('timelineStateChanged', { origin: 'frame', ...this.timelineState, pausePoints: [...this.timelineState.pausePoints] });
         }
         return true;
     }
@@ -2514,7 +2581,7 @@ let found = 0;
         if (image < 1 || image > 8999) return false;
         if (this.imageStoreState.get(output) !== image) {
             this.imageStoreState.set(output, image);
-            this.emitter.emit('imageStoreStateChanged', { output, image });
+            this.emitter.emit('imageStoreStateChanged', { origin: 'frame', output, image });
         }
         return true;
     }
@@ -2562,7 +2629,7 @@ let found = 0;
         }
         if (next.ramp !== previous.ramp || next.effectiveRate !== previous.effectiveRate || next.active !== previous.active || next.direction !== previous.direction) {
             this.transitionTelemetry.set(expected.did, next);
-            this.emitter.emit('transitionTelemetryChanged', { did: expected.did, ...next });
+            this.emitter.emit('transitionTelemetryChanged', { origin: 'frame', did: expected.did, ...next });
         }
         return true;
     }
@@ -2607,10 +2674,8 @@ let found = 0;
     }
 
     /**
-     * Subscribe to ME bus source selection updates.
-     * Sends 20 individual subscription packets:
-     *   4 buses (A=0, B=1, C=2, D=3) × 5 MEs (ME1=0, ME2=1, ME3=2, PGM=3, ME4=4)
-     * Pauses 5ms every 16 packets to prevent UDP flooding.
+     * Subscribe to 20 A-D bus and 30 K1-K6 source selections across five MEs.
+     * Sends one read-only subscription every 50ms on either transport.
      */
     subscribeToMEBus() {
         if (this.isClosing || this.mainHandshakeStage !== 9) {
@@ -2622,13 +2687,20 @@ let found = 0;
         }
 
         try {
-            // Build list of all 20 ME addresses
+            // Subscribe to 20 A-D buses and 30 keyer source selections in one paced queue.
             const addresses = [];
             for (let busCode = 0; busCode <= 3; busCode++) {       // A=0, B=1, C=2, D=3
                 for (let meNum = 0; meNum <= 4; meNum++) {         // ME1=0, ME2=1, ME3=2, PGM=3, ME4=4
-                    addresses.push((busCode << 4) | meNum);
+                    addresses.push({ address: (busCode << 4) | meNum, keyer: false });
                 }
             }
+
+            for (let key = 0; key < 6; key++) {
+                for (let me = 0; me < 5; me++) {
+                    addresses.push({ address: (key << 4) | me, keyer: true });
+                }
+            }
+            this.subscribedMEs.add('all'); // Prevent duplicate queues while subscriptions are pending.
 
             // Send one packet per 50ms to avoid CPLScheduler buffer overflow
             let idx = 0;
@@ -2636,19 +2708,21 @@ let found = 0;
                 if (this.isClosing || idx >= addresses.length) {
                     if (idx >= addresses.length) {
                         this.subscribedMEs.add('all');
-                        this.emitter.emit('status', 'ME_SUBSCRIBED', `Subscribed to all 20 ME buses`);
+                        this.emitter.emit('status', 'ME_SUBSCRIBED', `Subscribed to 20 ME buses and 30 keyer sources`);
                     }
                     return;
                 }
-                const addr = addresses[idx];
-                const { packet, subId } = this.buildMESubscriptionPacket(addr);
-                this.meSubscriptionIds.set(subId, addr);
+                const { address, keyer } = addresses[idx];
+                const { packet, subId } = keyer
+                    ? this.buildParameterSubscriptionPacket(0x103a, 0x08000000 + address)
+                    : this.buildMESubscriptionPacket(address);
+                if (!keyer) this.meSubscriptionIds.set(subId, address);
                 this.sendToFrame(packet);
                 idx++;
                 setTimeout(sendNext, 50);
             };
             sendNext();
-            return { success: true, message: 'ME subscription in progress (20 buses)' };
+            return { success: true, message: 'ME subscription in progress (20 buses, 30 keyer sources)' };
         } catch (error) {
             return { success: false, message: `Error creating ME subscription: ${error.message}` };
         }
@@ -2744,9 +2818,25 @@ let found = 0;
                                 if (previousSource !== sourceNum) {
                                     this.auxState.set(auxNum, sourceNum);
                                     this.emitter.emit('auxStateChanged', {
+                                        origin: 'frame',
                                         auxNum,
                                         previousSource,
                                         currentSource: sourceNum
+                                    });
+                                }
+                            }
+                        } else if (signature === 0x103a && marker === 0x08 && payLen >= 22) {
+                            const address = msg.readUInt32BE(pb + 12) - 0x08000000;
+                            const source = msg.readUInt16BE(pb + 20);
+                            const me = address & 0x0f;
+                            const key = address >> 4;
+                            if (address >= 0 && me <= 4 && key <= 5 && source <= 809) {
+                                const previousSource = this.keyerState.get(address) ?? null;
+                                if (previousSource !== source) {
+                                    this.keyerState.set(address, source);
+                                    this.emitter.emit('meStateChanged', {
+                                        origin: 'frame', kind: 'keyer', address,
+                                        previousSource, currentSource: source
                                     });
                                 }
                             }
@@ -2761,6 +2851,7 @@ let found = 0;
                                 if (previousSource !== sourceNum) {
                                     this.meState.set(addr, sourceNum);
                                     this.emitter.emit('meStateChanged', {
+                                        origin: 'frame',
                                         address: addr,
                                         previousSource,
                                         currentSource: sourceNum
@@ -2974,6 +3065,10 @@ let found = 0;
      * Get current source on a specific ME bus
      * @param {number} address - ME address byte: (bus_code << 4) | me_num
      */
+    getKeyerSource(address) {
+        return this.keyerState.get(address) ?? null;
+    }
+
     getMESource(address) {
         return this.meState.get(address) || null;
     }

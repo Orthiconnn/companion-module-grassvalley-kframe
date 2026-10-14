@@ -43,7 +43,8 @@ class ConnectionManager {
         // Forward events from connection to manager emitter
         connection.emitter.on('status', (type, message) => {
             // Emit with connectionId so listeners know which connection this is for
-            this.emitter.emit('status', connectionId, type, message);
+            if (this.connections.get(connectionId) === connection)
+                this.emitter.emit('status', connectionId, type, message);
         });
 
         // Forward AUX state change events
@@ -81,7 +82,9 @@ class ConnectionManager {
             const cleanup = await connection.start();
             return cleanup;
         } catch (error) {
-            this.connections.delete(connectionId);
+            connection.cleanup();
+            // An older cancelled attempt must not delete a replacement connection.
+            if (this.connections.get(connectionId) === connection) this.connections.delete(connectionId);
             throw error;
         }
     }
@@ -355,6 +358,10 @@ class ConnectionManager {
     /**
      * Get current source on a specific ME bus
      */
+    getKeyerSource(connectionId, address) {
+        return this.connections.get(connectionId)?.getKeyerSource(address) ?? null;
+    }
+
     getMESource(connectionId, address) {
         const connection = this.connections.get(connectionId);
         if (!connection) return null;
@@ -503,6 +510,7 @@ module.exports = {
     getAllAuxState: (id) => connectionManager.getAllAuxState(id),
     isSourceOnAnyAux: (id, sourceNum, excludeAux) => connectionManager.isSourceOnAnyAux(id, sourceNum, excludeAux),
     subscribeToMEBus: (id) => connectionManager.subscribeToMEBus(id),
+    getKeyerSource: (id, address) => connectionManager.getKeyerSource(id, address),
     getMESource: (id, address) => connectionManager.getMESource(id, address),
 	 getTimelineState: (id) => connectionManager.getTimelineState(id),
 	 subscribeToMasterTimeline: (id) => connectionManager.subscribeToMasterTimeline(id),

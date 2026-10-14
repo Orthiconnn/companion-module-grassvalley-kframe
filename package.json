@@ -1,23 +1,23 @@
 {
-	"name": "grassvalley-kframe",
-	"version": "0.9.1",
+	"name": "companion-module-grassvalley-kayenne",
+	"version": "2026.0.9-beta.2",
 	"main": "dist/main.js",
 	"type": "module",
 	"scripts": {
 		"postinstall": "husky",
 		"format": "prettier -w .",
-		"package": "run build && companion-module-build",
-		"build": "rimraf dist && run build:main",
+		"package": "npm run build && companion-module-build --prerelease",
+		"build": "rimraf dist && npm run build:main",
 		"build:main": "tsc -p tsconfig.build.json",
-		"test": "run build && node test/test-builders.cjs && node test/test-legacy-actions.mjs",
+		"test": "npm run build && node test/test-builders.cjs && node test/test-legacy-actions.mjs && node test/test-upgrades.mjs && node test/test-config.mjs && node --test test/repro-connection-lifecycle.cjs test/repro-keyer-tally.mjs test/repro-keyer-active-tally.mjs test/repro-multi-action-feedback.mjs test/repro-macro-dropdown.mjs",
 		"dev": "tsc -p tsconfig.build.json --watch",
 		"lint:raw": "eslint",
-		"lint": "run lint:raw ."
+		"lint": "npm run lint:raw -- ."
 	},
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/bitfocus/companion-module-grassvalley-kframe.git"
+		"url": "git+https://github.com/bitfocus/companion-module-grassvalley-kayenne.git"
 	},
 	"engines": {
 		"node": "^22.20",
@@ -43,7 +43,7 @@
 			"prettier --write"
 		],
 		"*.{ts,tsx,js,jsx}": [
-			"yarn lint:raw --fix"
+			"npm run lint:raw -- --fix"
 		]
 	},
 	"packageManager": "yarn@4.17.0"

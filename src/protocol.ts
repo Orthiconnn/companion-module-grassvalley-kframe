@@ -48,6 +48,7 @@ export type ProtocolManager = {
 	getSourceNames(id: string): SourceName[]
 	getAuxSource(id: string, aux: number): number | null
 	getMESource(id: string, address: number): number | null
+	getKeyerSource(id: string, address: number): number | null
 	getTimelineState(id: string): TimelineState | null
 	getImageStoreImage(id: string, output: number): number | null
 	getTransitionTelemetry(id: string, did: number): TransitionTelemetry | null
