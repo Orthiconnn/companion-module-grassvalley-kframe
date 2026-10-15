@@ -167,7 +167,9 @@ export function UpdateActions(self: ModuleInstance): void {
 			callback: async (e) => {
 				const suite = suiteId(e.options.suite),
 					status = self.suiteStates[suite].status
-				if (status === 'connected' || status === 'connecting') await self.disconnectSuite(suite)
+				// A press while the previous Disconnect is still closing means connect again.
+				if (!self.isSuiteDisconnecting(suite) && (status === 'connected' || status === 'connecting'))
+					await self.disconnectSuite(suite)
 				else connectInBackground(suite)
 			},
 		},

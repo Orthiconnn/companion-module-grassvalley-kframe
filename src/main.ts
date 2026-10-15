@@ -140,6 +140,9 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	private reportedStatus?: InstanceStatus
 	private automaticConnectChain: Promise<void> = Promise.resolve()
 	private readonly manuallyDisconnectedSuites = new Set<SuiteId>()
+	// The protocol announces DISCONNECTED before its cleanup finishes; a connect
+	// waits for that cleanup so the finished close cannot overwrite the new link.
+	private readonly suiteDisconnects = new Map<SuiteId, Promise<void>>()
 	private readonly automaticConnectInProgress = new Set<SuiteId>()
 	private readonly automaticConnectQueued = new Set<SuiteId>()
 	private readonly suiteStatusWaiters = new Set<() => void>()
@@ -493,13 +496,14 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 
 	async connectSuite(value: unknown, automatic = false, automaticGeneration?: number): Promise<boolean> {
 		const id = suiteId(value)
-		const state = this.suiteStates[id]
 		if (!automatic) this.manuallyDisconnectedSuites.delete(id)
 		if (!this.config.host) {
 			this.reportedStatus = InstanceStatus.BadConfig
 			this.updateStatus(InstanceStatus.BadConfig, 'Target IP is required')
 			return false
 		}
+		await this.suiteDisconnects.get(id)?.catch(() => undefined)
+		const state = this.suiteStates[id]
 		if (state.status === 'connected' || state.status === 'connecting') return true
 		state.status = 'connecting'
 		state.connectionPhase = 'establishing'
@@ -570,10 +574,22 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	async disconnectSuite(value: unknown): Promise<void> {
 		const id = suiteId(value)
 		this.manuallyDisconnectedSuites.add(id)
-		await protocol.disconnectConnection(this.connectionId(id))
-		this.suiteStates[id] = { status: 'disconnected', frameVersion: '', protocolName: '', heartbeatFlash: false }
-		if (!this.shuttingDown) this.handleSourceNamesUpdated(this.connectionId(id))
-		this.updateRuntimeState()
+		const closing = (async () => {
+			await protocol.disconnectConnection(this.connectionId(id))
+			this.suiteStates[id] = { status: 'disconnected', frameVersion: '', protocolName: '', heartbeatFlash: false }
+			if (!this.shuttingDown) this.handleSourceNamesUpdated(this.connectionId(id))
+			this.updateRuntimeState()
+		})()
+		this.suiteDisconnects.set(id, closing)
+		try {
+			await closing
+		} finally {
+			if (this.suiteDisconnects.get(id) === closing) this.suiteDisconnects.delete(id)
+		}
+	}
+
+	isSuiteDisconnecting(value: unknown): boolean {
+		return this.suiteDisconnects.has(suiteId(value))
 	}
 
 	private isSuiteSelected(id: SuiteId): boolean {
