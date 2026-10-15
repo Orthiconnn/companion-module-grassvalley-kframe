@@ -1,5 +1,6 @@
 import type ModuleInstance from './main.js'
-import { suiteId } from './main.js'
+import { buttonStyle, suiteId } from './main.js'
+import { ME_INDEXES } from './mix-effects.js'
 import { buildButtonMapping, buildGpi, buildPbusRecall, buildPbusTrigger, PBUS_TRIGGERS } from './legacy-actions.js'
 
 type SuiteOption = { suite?: string; textSize?: number; showSuite?: boolean }
@@ -31,12 +32,11 @@ export type ActionsSchema = {
 	}
 }
 
-const meIndexes: Record<string, number> = { PGM: 3, ME1: 0, ME2: 1, ME3: 2, ME4: 4 }
-const crosspointChoices = Object.keys(meIndexes).flatMap((me) => [
+const crosspointChoices = Object.keys(ME_INDEXES).flatMap((me) => [
 	...['A', 'B', 'C', 'D'].map((bus) => ({ id: `${me}_${bus}`, label: `${me} ${bus}` })),
 	...Array.from({ length: 6 }, (_, index) => ({ id: `${me}_K${index + 1}`, label: `${me} Key ${index + 1}` })),
 ])
-const transitionChoices = Object.keys(meIndexes).flatMap((me) => [
+const transitionChoices = Object.keys(ME_INDEXES).flatMap((me) => [
 	{ id: `${me}_PRI`, label: `${me} Primary` },
 	{ id: `${me}_SEC`, label: `${me} Secondary` },
 	{ id: `${me}_BOTH`, label: `${me} Both` },
@@ -44,19 +44,19 @@ const transitionChoices = Object.keys(meIndexes).flatMap((me) => [
 ])
 const ememChoices = [
 	{ id: 'MASTER', label: 'Master' },
-	...Object.keys(meIndexes).flatMap((me) =>
+	...Object.keys(ME_INDEXES).flatMap((me) =>
 		['PRI', 'SEC', 'BOTH'].map((mode) => ({ id: `${me}-${mode}`, label: `${me} ${mode}` })),
 	),
 	...['PRI', 'SEC', 'BOTH'].map((mode) => ({ id: `eDPM-${mode}`, label: `eDPM ${mode}` })),
 ]
 const timelineTargetChoices = [
 	{ id: 'MASTER', label: 'Master' },
-	...Object.keys(meIndexes).map((me) => ({ id: me, label: me })),
+	...Object.keys(ME_INDEXES).map((me) => ({ id: me, label: me })),
 	{ id: 'eDPM', label: 'eDPM' },
 ]
 const timelineRunTargetChoices = [
 	{ id: 'MASTER', label: 'Master' },
-	...Object.keys(meIndexes).flatMap((me) =>
+	...Object.keys(ME_INDEXES).flatMap((me) =>
 		['PRI', 'SEC', 'BOTH'].map((mode) => ({ id: `${me}-${mode}`, label: `${me} ${mode}` })),
 	),
 	...['PRI', 'SEC', 'BOTH'].map((mode) => ({ id: `eDPM-${mode}`, label: `eDPM ${mode}` })),
@@ -72,6 +72,22 @@ const timelineCommands: Record<string, { eid: number; data: number[] }> = {
 	mod_all: { eid: 0x006d, data: [0x01] },
 	mod_all_absolute: { eid: 0x006d, data: [0x02] },
 }
+
+// Empty, zero or non-numeric options fall back to the action's first value.
+const optionNumber = (value: unknown, fallback = 1): number => Number(value) || fallback
+const pbusValue = (value: unknown): number => {
+	const number = Number(value)
+	return Number.isInteger(number) && number >= 0 ? number : 0
+}
+const actionLabel = (
+	kind: 'macro_stop' | 'run' | 'timeline_edit',
+	options: { value?: unknown; target?: unknown; command?: unknown },
+) => ({
+	kind,
+	macro: optionNumber(options.value),
+	target: typeof options.target === 'string' ? options.target : 'MASTER',
+	command: typeof options.command === 'string' ? options.command : '',
+})
 
 function resultOrThrow(result: { success: boolean; message: string }): void {
 	if (!result.success) throw new Error(result.message)
@@ -123,13 +139,7 @@ export function UpdateActions(self: ModuleInstance): void {
 	} = {
 		optionsToMonitorForSubscribe: ['suite', 'textSize', 'showSuite'],
 		subscribe: (action: { id: string; controlId: string; options: SuiteOption }) =>
-			self.trackSuiteButton(
-				action.controlId,
-				action.id,
-				action.options.suite,
-				action.options.textSize,
-				action.options.showSuite,
-			),
+			self.trackSuiteButton(action.controlId, action.id, buttonStyle(action.options)),
 		unsubscribe: (action: { id: string; controlId: string }) => self.untrackSuiteButton(action.controlId, action.id),
 	}
 	self.setActionDefinitions({
@@ -177,17 +187,8 @@ export function UpdateActions(self: ModuleInstance): void {
 				showSuiteOption,
 			],
 			optionsToMonitorForSubscribe: ['suite', 'value', 'labelOverride', 'textSize', 'showSuite'],
-			subscribe: (action) =>
-				self.trackMacroButton(
-					action.controlId,
-					action.options.suite,
-					action.options.value,
-					action.options.labelOverride,
-					action.options.textSize,
-					action.options.showSuite,
-					action.id,
-				),
-			unsubscribe: (action) => self.untrackMacroButton(action.controlId, action.id),
+			subscribe: (action) => self.trackButton(self.macroButtons, action, { macro: optionNumber(action.options.value) }),
+			unsubscribe: (action) => self.untrackButton(self.macroButtons, action),
 			callback: (e) => resultOrThrow(p.sendMacro(id(e), Number(e.options.value))),
 		},
 		macro_stop: {
@@ -209,8 +210,9 @@ export function UpdateActions(self: ModuleInstance): void {
 				showSuiteOption,
 			],
 			optionsToMonitorForSubscribe: ['suite', 'value', 'labelOverride', 'textSize', 'showSuite'],
-			subscribe: (action) => self.trackActionLabelButton(action.controlId, action.id, 'macro_stop', action.options),
-			unsubscribe: (action) => self.untrackActionLabelButton(action.controlId, action.id),
+			subscribe: (action) =>
+				self.trackButton(self.actionLabelButtons, action, actionLabel('macro_stop', action.options)),
+			unsubscribe: (action) => self.untrackButton(self.actionLabelButtons, action),
 			callback: (e) => resultOrThrow(p.sendMacroStop(id(e), Number(e.options.value))),
 		},
 		macro_stop_all: {
@@ -223,17 +225,11 @@ export function UpdateActions(self: ModuleInstance): void {
 			name: 'AUX: Route Source',
 			optionsToMonitorForSubscribe: ['suite', 'aux', 'source', 'labelOverride', 'textSize', 'showSuite'],
 			subscribe: (action) =>
-				self.trackAuxButton(
-					action.controlId,
-					action.options.suite,
-					action.options.aux,
-					action.options.source,
-					action.options.labelOverride,
-					action.options.textSize,
-					action.options.showSuite,
-					action.id,
-				),
-			unsubscribe: (action) => self.untrackAuxButton(action.controlId, action.id),
+				self.trackButton(self.auxButtons, action, {
+					aux: optionNumber(action.options.aux),
+					source: optionNumber(action.options.source),
+				}),
+			unsubscribe: (action) => self.untrackButton(self.auxButtons, action),
 			options: [
 				suiteOption,
 				{ id: 'aux', type: 'number', label: 'AUX', default: 1, min: 1, max: 96 },
@@ -271,17 +267,11 @@ export function UpdateActions(self: ModuleInstance): void {
 			name: 'Crosspoint: Route Source',
 			optionsToMonitorForSubscribe: ['suite', 'target', 'source', 'labelOverride', 'textSize', 'showSuite'],
 			subscribe: (action) =>
-				self.trackCrosspointButton(
-					action.controlId,
-					action.options.suite,
-					action.options.target,
-					action.options.source,
-					action.options.labelOverride,
-					action.options.textSize,
-					action.options.showSuite,
-					action.id,
-				),
-			unsubscribe: (action) => self.untrackCrosspointButton(action.controlId, action.id),
+				self.trackButton(self.crosspointButtons, action, {
+					target: String(action.options.target),
+					source: optionNumber(action.options.source),
+				}),
+			unsubscribe: (action) => self.untrackButton(self.crosspointButtons, action),
 			options: [
 				suiteOption,
 				{ id: 'target', type: 'dropdown', label: 'Bus / Keyer', default: 'PGM_A', choices: crosspointChoices },
@@ -303,7 +293,7 @@ export function UpdateActions(self: ModuleInstance): void {
 				const [me, bus] = String(e.options.target).split('_')
 				if (typeof e.options.source !== 'number' && typeof e.options.source !== 'string')
 					throw new Error('Invalid source number (must be a whole number from 1-809).')
-				const index = meIndexes[me]
+				const index = ME_INDEXES[me]
 				if (index === undefined || !bus) throw new Error('Invalid crosspoint target')
 				const key = /^K([1-6])$/.exec(bus)
 				const offset = key ? (Number(key[1]) - 1) * 0x10 : ['A', 'B', 'C', 'D'].indexOf(bus) * 0x10
@@ -322,17 +312,11 @@ export function UpdateActions(self: ModuleInstance): void {
 			name: 'E-MEM: Recall',
 			optionsToMonitorForSubscribe: ['suite', 'target', 'register', 'labelOverride', 'textSize', 'showSuite'],
 			subscribe: (action) =>
-				self.trackEmemButton(
-					action.controlId,
-					action.options.suite,
-					action.options.target,
-					action.options.register,
-					action.options.labelOverride,
-					action.options.textSize,
-					action.options.showSuite,
-					action.id,
-				),
-			unsubscribe: (action) => self.untrackEmemButton(action.controlId, action.id),
+				self.trackButton(self.ememButtons, action, {
+					target: String(action.options.target),
+					register: optionNumber(action.options.register, 0),
+				}),
+			unsubscribe: (action) => self.untrackButton(self.ememButtons, action),
 			options: [
 				suiteOption,
 				{ id: 'target', type: 'dropdown', label: 'Target', default: 'MASTER', choices: ememChoices },
@@ -346,7 +330,7 @@ export function UpdateActions(self: ModuleInstance): void {
 					register = Number(e.options.register)
 				if (target === 'MASTER') return resultOrThrow(p.sendEMem(id(e), register))
 				const [me, modeName] = target.split('-')
-				const index = me === 'eDPM' ? 10 : meIndexes[me]
+				const index = me === 'eDPM' ? 10 : ME_INDEXES[me]
 				const mode = { PRI: 0, SEC: 1, BOTH: 2 }[modeName]
 				if (index === undefined || mode === undefined) throw new Error('Invalid E-MEM target')
 				resultOrThrow(p.sendEMemTargeted(id(e), register, 0x02000000 + index, mode))
@@ -373,20 +357,14 @@ export function UpdateActions(self: ModuleInstance): void {
 			],
 			optionsToMonitorForSubscribe: ['suite', 'target', 'transition', 'labelOverride', 'textSize', 'showSuite'],
 			subscribe: (action) =>
-				self.trackTransitionButton(
-					action.controlId,
-					action.options.suite,
-					action.options.target,
-					action.options.transition,
-					action.options.labelOverride,
-					action.options.textSize,
-					action.options.showSuite,
-					action.id,
-				),
-			unsubscribe: (action) => self.untrackTransitionButton(action.controlId, action.id),
+				self.trackButton(self.transitionButtons, action, {
+					target: String(action.options.target),
+					transition: String(action.options.transition),
+				}),
+			unsubscribe: (action) => self.untrackButton(self.transitionButtons, action),
 			callback: (e) => {
 				const [me, bus] = String(e.options.target).split('_')
-				const index = meIndexes[me]
+				const index = ME_INDEXES[me]
 				if (index === undefined || !bus) throw new Error('Invalid transition target')
 				const eventId = String(e.options.transition) === 'cut' ? 0x44 : 0x43
 				if (bus === 'BOTH') {
@@ -412,16 +390,8 @@ export function UpdateActions(self: ModuleInstance): void {
 			],
 			optionsToMonitorForSubscribe: ['suite', 'value', 'labelOverride', 'textSize', 'showSuite'],
 			subscribe: (action) =>
-				self.trackPanelMemoryButton(
-					action.controlId,
-					action.options.suite,
-					action.options.value,
-					action.options.labelOverride,
-					action.options.textSize,
-					action.options.showSuite,
-					action.id,
-				),
-			unsubscribe: (action) => self.untrackPanelMemoryButton(action.controlId, action.id),
+				self.trackButton(self.panelMemoryButtons, action, { register: optionNumber(action.options.value) }),
+			unsubscribe: (action) => self.untrackButton(self.panelMemoryButtons, action),
 			callback: (e) => resultOrThrow(p.sendPanelMem(id(e), Number(e.options.value))),
 		},
 		image_store: {
@@ -437,17 +407,11 @@ export function UpdateActions(self: ModuleInstance): void {
 			],
 			optionsToMonitorForSubscribe: ['suite', 'output', 'image', 'labelOverride', 'textSize', 'showSuite'],
 			subscribe: (action) =>
-				self.trackImageStoreButton(
-					action.controlId,
-					action.options.suite,
-					action.options.output,
-					action.options.image,
-					action.options.labelOverride,
-					action.options.textSize,
-					action.options.showSuite,
-					action.id,
-				),
-			unsubscribe: (action) => self.untrackImageStoreButton(action.controlId, action.id),
+				self.trackButton(self.imageStoreButtons, action, {
+					output: optionNumber(action.options.output),
+					image: optionNumber(action.options.image),
+				}),
+			unsubscribe: (action) => self.untrackButton(self.imageStoreButtons, action),
 			callback: (e) => resultOrThrow(p.sendImageStore(id(e), Number(e.options.output), Number(e.options.image))),
 		},
 		image_store_input: {
@@ -470,16 +434,8 @@ export function UpdateActions(self: ModuleInstance): void {
 			],
 			optionsToMonitorForSubscribe: ['suite', 'value', 'labelOverride', 'textSize', 'showSuite'],
 			subscribe: (action) =>
-				self.trackImageStoreInputButton(
-					action.controlId,
-					action.options.suite,
-					action.options.value,
-					action.options.labelOverride,
-					action.options.textSize,
-					action.options.showSuite,
-					action.id,
-				),
-			unsubscribe: (action) => self.untrackImageStoreInputButton(action.controlId, action.id),
+				self.trackButton(self.imageStoreInputButtons, action, { source: optionNumber(action.options.value) }),
+			unsubscribe: (action) => self.untrackButton(self.imageStoreInputButtons, action),
 			callback: (e) => resultOrThrow(p.sendImageStoreInput(id(e), Number(e.options.value))),
 		},
 		raw_cpl: {
@@ -503,12 +459,12 @@ export function UpdateActions(self: ModuleInstance): void {
 				showSuiteOption,
 			],
 			optionsToMonitorForSubscribe: ['suite', 'target', 'labelOverride', 'textSize', 'showSuite'],
-			subscribe: (action) => self.trackActionLabelButton(action.controlId, action.id, 'run', action.options),
-			unsubscribe: (action) => self.untrackActionLabelButton(action.controlId, action.id),
+			subscribe: (action) => self.trackButton(self.actionLabelButtons, action, actionLabel('run', action.options)),
+			unsubscribe: (action) => self.untrackButton(self.actionLabelButtons, action),
 			callback: (e) => {
 				const target = String(e.options.target)
 				const [engine, partition] = target.split('-')
-				const did = target === 'MASTER' ? 0x35000001 : 0x02000000 + (engine === 'eDPM' ? 10 : meIndexes[engine])
+				const did = target === 'MASTER' ? 0x35000001 : 0x02000000 + (engine === 'eDPM' ? 10 : ME_INDEXES[engine])
 				if (!Number.isInteger(did)) throw new Error('Invalid timeline RUN target')
 				const mode = { PRI: 0, SEC: 1, BOTH: 2 }[partition]
 				if (target !== 'MASTER' && mode === undefined) throw new Error('Invalid timeline RUN partition')
@@ -543,13 +499,14 @@ export function UpdateActions(self: ModuleInstance): void {
 				showSuiteOption,
 			],
 			optionsToMonitorForSubscribe: ['suite', 'target', 'command', 'labelOverride', 'textSize', 'showSuite'],
-			subscribe: (action) => self.trackActionLabelButton(action.controlId, action.id, 'timeline_edit', action.options),
-			unsubscribe: (action) => self.untrackActionLabelButton(action.controlId, action.id),
+			subscribe: (action) =>
+				self.trackButton(self.actionLabelButtons, action, actionLabel('timeline_edit', action.options)),
+			unsubscribe: (action) => self.untrackButton(self.actionLabelButtons, action),
 			callback: (e) => {
 				const command = timelineCommands[String(e.options.command)]
 				if (!command) throw new Error('Invalid timeline command')
 				const target = String(e.options.target)
-				const did = target === 'MASTER' ? 0x35000001 : 0x02000000 + (target === 'eDPM' ? 10 : meIndexes[target])
+				const did = target === 'MASTER' ? 0x35000001 : 0x02000000 + (target === 'eDPM' ? 10 : ME_INDEXES[target])
 				if (!Number.isInteger(did)) throw new Error('Invalid timeline target')
 				resultOrThrow(p.sendTimelineEvent(id(e), command.eid, did, command.data))
 			},
@@ -564,17 +521,8 @@ export function UpdateActions(self: ModuleInstance): void {
 				showSuiteOption,
 			],
 			optionsToMonitorForSubscribe: ['suite', 'value', 'labelOverride', 'textSize', 'showSuite'],
-			subscribe: (action) =>
-				self.trackGpiButton(
-					action.controlId,
-					action.options.suite,
-					action.options.value,
-					action.options.labelOverride,
-					action.options.textSize,
-					action.options.showSuite,
-					action.id,
-				),
-			unsubscribe: (action) => self.untrackGpiButton(action.controlId, action.id),
+			subscribe: (action) => self.trackButton(self.gpiButtons, action, { gpi: optionNumber(action.options.value) }),
+			unsubscribe: (action) => self.untrackButton(self.gpiButtons, action),
 			callback: (e) => resultOrThrow(p.sendRawCommand(id(e), buildGpi(Number(e.options.value)))),
 		},
 		pbus_recall: {
@@ -589,18 +537,12 @@ export function UpdateActions(self: ModuleInstance): void {
 			],
 			optionsToMonitorForSubscribe: ['suite', 'pbus', 'register', 'labelOverride', 'textSize', 'showSuite'],
 			subscribe: (action) =>
-				self.trackPbusButton(
-					action.controlId,
-					action.options.suite,
-					'recall',
-					action.options.pbus,
-					action.options.register,
-					action.options.labelOverride,
-					action.options.textSize,
-					action.options.showSuite,
-					action.id,
-				),
-			unsubscribe: (action) => self.untrackPbusButton(action.controlId, action.id),
+				self.trackButton(self.pbusButtons, action, {
+					pbus: optionNumber(action.options.pbus),
+					command: 'recall',
+					value: pbusValue(action.options.register),
+				}),
+			unsubscribe: (action) => self.untrackButton(self.pbusButtons, action),
 			callback: async (e) => {
 				const commands = buildPbusRecall(Number(e.options.pbus), Number(e.options.register))
 				resultOrThrow(p.sendRawCommand(id(e), commands[0]))
@@ -628,18 +570,12 @@ export function UpdateActions(self: ModuleInstance): void {
 			],
 			optionsToMonitorForSubscribe: ['suite', 'pbus', 'trigger', 'labelOverride', 'textSize', 'showSuite'],
 			subscribe: (action) =>
-				self.trackPbusButton(
-					action.controlId,
-					action.options.suite,
-					'trigger',
-					action.options.pbus,
-					action.options.trigger,
-					action.options.labelOverride,
-					action.options.textSize,
-					action.options.showSuite,
-					action.id,
-				),
-			unsubscribe: (action) => self.untrackPbusButton(action.controlId, action.id),
+				self.trackButton(self.pbusButtons, action, {
+					pbus: optionNumber(action.options.pbus),
+					command: 'trigger',
+					value: pbusValue(action.options.trigger),
+				}),
+			unsubscribe: (action) => self.untrackButton(self.pbusButtons, action),
 			callback: async (e) => {
 				const [clear, select, fire] = buildPbusTrigger(Number(e.options.pbus), Number(e.options.trigger))
 				for (const command of [clear, select, fire, clear]) {
@@ -693,19 +629,13 @@ export function UpdateActions(self: ModuleInstance): void {
 				'showSuite',
 			],
 			subscribe: (action) =>
-				self.trackMappingButton(
-					action.controlId,
-					action.options.suite,
-					action.options.bus,
-					action.options.shift,
-					action.options.button,
-					action.options.source,
-					action.options.labelOverride,
-					action.options.textSize,
-					action.options.showSuite,
-					action.id,
-				),
-			unsubscribe: (action) => self.untrackMappingButton(action.controlId, action.id),
+				self.trackButton(self.mappingButtons, action, {
+					bus: String(action.options.bus),
+					shift: optionNumber(action.options.shift),
+					button: optionNumber(action.options.button),
+					source: optionNumber(action.options.source),
+				}),
+			unsubscribe: (action) => self.untrackButton(self.mappingButtons, action),
 			callback: (e) =>
 				resultOrThrow(
 					p.sendRawCommand(

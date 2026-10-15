@@ -1,7 +1,10 @@
+import type { CompanionAdvancedFeedbackResult } from '@companion-module/base'
 import type ModuleInstance from './main.js'
+import type { ButtonStyle, SuiteButton } from './main.js'
 import { suiteId, suiteNumber, suitePorts } from './main.js'
 import { CLEAR_BADGE, labeledButtonSvg, SUITE_BADGES, timelineProgressSvg } from './badges.js'
 import { PBUS_TRIGGERS } from './legacy-actions.js'
+import { ME_COLORS, ME_INDEXES, OTHER_COLORS } from './mix-effects.js'
 
 type SuiteOptions = { suite?: string }
 export type FeedbacksSchema = {
@@ -58,6 +61,45 @@ const MAPPING_BUS_LABELS: Record<string, string> = {
 	aux: 'AUX',
 }
 
+const fontSize = (textScale: number): number => Math.round(10 * textScale)
+const suiteBadge = (button: SuiteButton): string =>
+	button.showSuite ? SUITE_BADGES[suiteNumber(button.suite)] : CLEAR_BADGE
+
+// Heading and label drawn into the button image. With automatic labels off the
+// user's own text stays and only the suite dot is drawn.
+function labeledFace(
+	button: ButtonStyle,
+	automaticLabel: boolean,
+	heading: string,
+	label: string,
+	color: number,
+): CompanionAdvancedFeedbackResult {
+	if (!automaticLabel) return { png64: suiteBadge(button), pngalignment: 'left:bottom' }
+	return {
+		text: '',
+		png64: labeledButtonSvg(
+			suiteNumber(button.suite),
+			heading,
+			label,
+			color,
+			undefined,
+			button.textSize,
+			button.showSuite,
+		),
+		pngalignment: 'center:bottom',
+	}
+}
+
+// Plain button text (left alone when undefined) with the suite dot in the corner.
+function textFace(button: ButtonStyle, text: string | undefined): CompanionAdvancedFeedbackResult {
+	return {
+		...(text === undefined ? {} : { text }),
+		png64: suiteBadge(button),
+		pngalignment: 'left:bottom',
+		size: fontSize(button.textSize),
+	}
+}
+
 export function UpdateFeedbacks(self: ModuleInstance): void {
 	self.setFeedbackDefinitions({
 		connection_state: {
@@ -78,7 +120,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 						text: `Suite ${suiteNumber(id)}\nConnected\n${protocolName}:${livePort}\n${heartbeat}`,
 						bgcolor: 0x287a0b,
 						color: 0xffffff,
-						size: Math.round(10 * actionTextSize),
+						size: fontSize(actionTextSize),
 						alignment: 'center:center',
 					}
 				}
@@ -87,14 +129,14 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 						text: `Suite ${suiteNumber(id)}\nConnecting\n${state.connectionPhase === 'handshake' ? 'Handshake' : 'Establishing'}`,
 						bgcolor: 0xb88600,
 						color: 0xffffff,
-						size: Math.round(10 * actionTextSize),
+						size: fontSize(actionTextSize),
 						alignment: 'center:center',
 					}
 				return {
 					text: `Suite ${suiteNumber(id)}\nDisconnected`,
 					bgcolor: 0xa80000,
 					color: 0xffffff,
-					size: Math.round(10 * actionTextSize),
+					size: fontSize(actionTextSize),
 					alignment: 'center:center',
 				}
 			},
@@ -150,12 +192,9 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 							? 0x66cc66
 							: 0x285b0b
 				return {
-					...(feedback.options.automaticLabel ? { text: macroName } : {}),
-					png64: assignment.showSuite ? SUITE_BADGES[suiteNumber(assignment.suite)] : CLEAR_BADGE,
-					pngalignment: 'left:bottom',
+					...textFace(assignment, feedback.options.automaticLabel ? macroName : undefined),
 					bgcolor,
 					color: paused ? (self.macroFlashOn ? 0x000000 : 0xffffff) : playing || lastPlayed ? 0x000000 : 0xffffff,
-					size: Math.round(10 * assignment.textSize),
 				}
 			},
 		},
@@ -179,24 +218,10 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				const sourceLabel = assignment.labelOverride || sourceName || String(assignment.source)
 				const color = online ? 0x000000 : 0xffffff
 				return {
-					...(feedback.options.automaticLabel ? { text: '' } : {}),
-					png64: feedback.options.automaticLabel
-						? labeledButtonSvg(
-								suiteNumber(assignment.suite),
-								`AUX ${assignment.aux}`,
-								sourceLabel,
-								color,
-								undefined,
-								assignment.textSize,
-								assignment.showSuite,
-							)
-						: assignment.showSuite
-							? SUITE_BADGES[suiteNumber(assignment.suite)]
-							: CLEAR_BADGE,
-					pngalignment: feedback.options.automaticLabel ? 'center:bottom' : 'left:bottom',
+					...labeledFace(assignment, feedback.options.automaticLabel, `AUX ${assignment.aux}`, sourceLabel, color),
 					bgcolor: online ? 0xb57edc : 0x5c005c,
 					color,
-					size: Math.round(10 * assignment.textSize),
+					size: fontSize(assignment.textSize),
 					alignment: 'center:center',
 				}
 			},
@@ -216,8 +241,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				const assignment = self.crosspointButtons.get(feedback.controlId)
 				if (!assignment) return {}
 				const [me, bus] = assignment.target.split('_')
-				const meIndex: Record<string, number> = { ME1: 0, ME2: 1, ME3: 2, PGM: 3, ME4: 4 }
-				const index = meIndex[me]
+				const index = ME_INDEXES[me]
 				const keyer = /^K([1-6])$/.exec(bus)
 				const busOffset = keyer ? (Number(keyer[1]) - 1) * 0x10 : ['A', 'B', 'C', 'D'].indexOf(bus) * 0x10
 				const address = index === undefined || busOffset < 0 ? -1 : index + busOffset
@@ -231,35 +255,14 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				const online = selectedSource !== null && selectedSource === assignment.source
 				const sourceName = self.protocol.resolveSourceDisplayName(connectionId, assignment.source)
 				const sourceLabel = assignment.labelOverride || sourceName || String(assignment.source)
-				const baseColors: Record<string, { bright: number; dark: number; color: number }> = {
-					ME1: { bright: 0x2e9d55, dark: 0x1d6538, color: 0xffffff },
-					ME2: { bright: 0xffd21f, dark: 0xb08c00, color: 0x000000 },
-					ME3: { bright: 0xff7a18, dark: 0xa84b00, color: 0x000000 },
-					ME4: { bright: 0x9b59b6, dark: 0x633974, color: 0xffffff },
-					PGM: { bright: 0xd93636, dark: 0x8d2020, color: 0xffffff },
-				}
-				const base = baseColors[me] ?? { bright: 0x444444, dark: 0x222222, color: 0xffffff }
+				const base = ME_COLORS[me] ?? OTHER_COLORS
 				const busLabel = /^K([1-6])$/.test(bus) ? `${me} ${bus}` : `${me}${bus}`
-				const color = online ? 0xffffff : base.color
+				const color = online ? 0xffffff : base.text
 				return {
-					...(feedback.options.automaticLabel ? { text: '' } : {}),
-					png64: feedback.options.automaticLabel
-						? labeledButtonSvg(
-								suiteNumber(assignment.suite),
-								busLabel,
-								sourceLabel,
-								color,
-								undefined,
-								assignment.textSize,
-								assignment.showSuite,
-							)
-						: assignment.showSuite
-							? SUITE_BADGES[suiteNumber(assignment.suite)]
-							: CLEAR_BADGE,
-					pngalignment: feedback.options.automaticLabel ? 'center:bottom' : 'left:bottom',
+					...labeledFace(assignment, feedback.options.automaticLabel, busLabel, sourceLabel, color),
 					bgcolor: online ? 0xff0000 : bus === 'A' ? base.bright : base.dark,
 					color,
-					size: Math.round(10 * assignment.textSize),
+					size: fontSize(assignment.textSize),
 					alignment: 'center:center',
 				}
 			},
@@ -279,21 +282,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				const label = assignment.labelOverride || String(assignment.image).padStart(4, '0')
 				const color = loaded ? 0x000000 : 0xffffff
 				return {
-					...(feedback.options.automaticLabel ? { text: '' } : {}),
-					png64: feedback.options.automaticLabel
-						? labeledButtonSvg(
-								suiteNumber(assignment.suite),
-								`IS${assignment.output}`,
-								label,
-								color,
-								undefined,
-								assignment.textSize,
-								assignment.showSuite,
-							)
-						: assignment.showSuite
-							? SUITE_BADGES[suiteNumber(assignment.suite)]
-							: CLEAR_BADGE,
-					pngalignment: feedback.options.automaticLabel ? 'center:bottom' : 'left:bottom',
+					...labeledFace(assignment, feedback.options.automaticLabel, `IS${assignment.output}`, label, color),
 					bgcolor: loaded ? 0xb9a3e3 : 0x6a4c93,
 					color,
 				}
@@ -311,12 +300,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					assignment.source,
 				)
 				const label = assignment.labelOverride || sourceName || String(assignment.source)
-				return {
-					...(feedback.options.automaticLabel ? { text: `IMAGE IN\n${label}` } : {}),
-					png64: assignment.showSuite ? SUITE_BADGES[suiteNumber(assignment.suite)] : CLEAR_BADGE,
-					pngalignment: 'left:bottom',
-					size: Math.round(10 * assignment.textSize),
-				}
+				return textFace(assignment, feedback.options.automaticLabel ? `IMAGE IN\n${label}` : undefined)
 			},
 		},
 		panel_memory_button_state: {
@@ -329,23 +313,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				const assignment = self.panelMemoryButtons.get(feedback.controlId)
 				if (!assignment) return {}
 				const label = assignment.labelOverride || String(assignment.register)
-				return {
-					...(feedback.options.automaticLabel ? { text: '' } : {}),
-					png64: feedback.options.automaticLabel
-						? labeledButtonSvg(
-								suiteNumber(assignment.suite),
-								'PNL MEM',
-								label,
-								0xffffff,
-								undefined,
-								assignment.textSize,
-								assignment.showSuite,
-							)
-						: assignment.showSuite
-							? SUITE_BADGES[suiteNumber(assignment.suite)]
-							: CLEAR_BADGE,
-					pngalignment: feedback.options.automaticLabel ? 'center:bottom' : 'left:bottom',
-				}
+				return labeledFace(assignment, feedback.options.automaticLabel, 'PNL MEM', label, 0xffffff)
 			},
 		},
 		gpi_button_state: {
@@ -355,12 +323,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 			callback: (feedback) => {
 				const assignment = self.gpiButtons.get(feedback.controlId)
 				if (!assignment) return {}
-				return {
-					text: assignment.labelOverride || `GPI\n${assignment.gpi}`,
-					png64: assignment.showSuite ? SUITE_BADGES[suiteNumber(assignment.suite)] : CLEAR_BADGE,
-					pngalignment: 'left:bottom',
-					size: Math.round(10 * assignment.textSize),
-				}
+				return textFace(assignment, assignment.labelOverride || `GPI\n${assignment.gpi}`)
 			},
 		},
 		pbus_button_state: {
@@ -377,12 +340,10 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 						? `RECALL ${assignment.value}`
 						: (PBUS_TRIGGERS[assignment.value]?.short ?? `TRIGGER ${assignment.value}`)
 				}`
-				return {
-					...(feedback.options.automaticLabel ? { text: assignment.labelOverride || automaticText } : {}),
-					png64: assignment.showSuite ? SUITE_BADGES[suiteNumber(assignment.suite)] : CLEAR_BADGE,
-					pngalignment: 'left:bottom',
-					size: Math.round(10 * assignment.textSize),
-				}
+				return textFace(
+					assignment,
+					feedback.options.automaticLabel ? assignment.labelOverride || automaticText : undefined,
+				)
 			},
 		},
 		button_mapping_state: {
@@ -396,12 +357,10 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				if (!assignment) return {}
 				const bus = MAPPING_BUS_LABELS[assignment.bus] ?? assignment.bus.toUpperCase()
 				const automaticText = `${bus} MAP\nS${assignment.shift} B${assignment.button}→${assignment.source}`
-				return {
-					...(feedback.options.automaticLabel ? { text: assignment.labelOverride || automaticText } : {}),
-					png64: assignment.showSuite ? SUITE_BADGES[suiteNumber(assignment.suite)] : CLEAR_BADGE,
-					pngalignment: 'left:bottom',
-					size: Math.round(10 * assignment.textSize),
-				}
+				return textFace(
+					assignment,
+					feedback.options.automaticLabel ? assignment.labelOverride || automaticText : undefined,
+				)
 			},
 		},
 		transition_button_state: {
@@ -414,17 +373,9 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				const target = assignment.target.replace('_', ' ')
 				const transition = assignment.transition.toUpperCase()
 				const me = assignment.target.split('_')[0]
-				const familyColors: Record<string, { bright: number; dark: number; text: number }> = {
-					ME1: { bright: 0x2e9d55, dark: 0x1d6538, text: 0xffffff },
-					ME2: { bright: 0xffd21f, dark: 0xb08c00, text: 0x000000 },
-					ME3: { bright: 0xff7a18, dark: 0xa84b00, text: 0x000000 },
-					ME4: { bright: 0x9b59b6, dark: 0x633974, text: 0xffffff },
-					PGM: { bright: 0xd93636, dark: 0x8d2020, text: 0xffffff },
-				}
-				const family = familyColors[me] ?? { bright: 0x444444, dark: 0x222222, text: 0xffffff }
+				const family = ME_COLORS[me] ?? OTHER_COLORS
 				const color = family.text
-				const meIndexes: Record<string, number> = { ME1: 0, ME2: 1, ME3: 2, PGM: 3, ME4: 4 }
-				const meIndex = meIndexes[me]
+				const meIndex = ME_INDEXES[me]
 				const partition = assignment.target.split('_')[1]
 				const primaryDid = meIndex === undefined ? -1 : 0x03000000 + meIndex
 				const secondaryDid = meIndex === undefined ? -1 : 0x03000010 + meIndex
@@ -473,23 +424,8 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				if (!assignment) return {}
 				const heading = assignment.target === 'MASTER' ? 'MASTER' : assignment.target.replace('-', ' ')
 				const me = assignment.target.split('-')[0]
-				const textColors: Record<string, number> = {
-					ME1: 0xffffff,
-					ME2: 0x000000,
-					ME3: 0x000000,
-					ME4: 0xffffff,
-					PGM: 0xffffff,
-					MASTER: 0x000000,
-				}
-				const color = textColors[me] ?? textColors[assignment.target] ?? 0xffffff
-				const backgrounds: Record<string, { bright: number; dark: number }> = {
-					ME1: { bright: 0x2e9d55, dark: 0x1d6538 },
-					ME2: { bright: 0xffd21f, dark: 0xb08c00 },
-					ME3: { bright: 0xff7a18, dark: 0xa84b00 },
-					ME4: { bright: 0x9b59b6, dark: 0x633974 },
-					PGM: { bright: 0xd93636, dark: 0x8d2020 },
-				}
-				const background = backgrounds[me]
+				const background = ME_COLORS[me]
+				const color = assignment.target === 'MASTER' ? 0x000000 : (background?.text ?? 0xffffff)
 				const secondary = assignment.target.endsWith('-SEC')
 				return {
 					text: '',
@@ -535,9 +471,9 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					state.cursorTime === null
 				)
 					return {
-						png64: showSuite ? SUITE_BADGES[suiteNumber(suite)] : CLEAR_BADGE,
+						png64: suiteBadge({ suite, textSize: actionTextSize, showSuite }),
 						pngalignment: 'center:bottom',
-						size: Math.round(10 * actionTextSize),
+						size: fontSize(actionTextSize),
 					}
 				return {
 					png64: timelineProgressSvg(
@@ -550,7 +486,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 						showSuite,
 					),
 					pngalignment: 'center:bottom',
-					size: Math.round(10 * actionTextSize),
+					size: fontSize(actionTextSize),
 				}
 			},
 		},
@@ -577,7 +513,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					const command = TIMELINE_EDIT_LABELS[assignment.command] ?? assignment.command.toUpperCase()
 					text = assignment.labelOverride || (assignment.target === 'MASTER' ? command : `${target}\n${command}`)
 				}
-				return { text, size: Math.round(10 * assignment.textSize) }
+				return { text, size: fontSize(assignment.textSize) }
 			},
 		},
 		suite_badge: {
@@ -593,7 +529,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				if (suites.size !== 1) return { png64: CLEAR_BADGE }
 				const [suite] = suites
 				const size = self.primarySuiteButton(feedback.controlId)?.textSize ?? assignments[0]?.textSize ?? 1
-				return { png64: SUITE_BADGES[suiteNumber(suite)], pngalignment: 'left:bottom', size: Math.round(10 * size) }
+				return { png64: SUITE_BADGES[suiteNumber(suite)], pngalignment: 'left:bottom', size: fontSize(size) }
 			},
 		},
 	})

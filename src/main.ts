@@ -58,16 +58,38 @@ export function primaryAction<T>(actions: Map<string, T> | undefined): T | undef
 	return actions.get(winner as string)
 }
 
+export type SuiteButton = { suite: SuiteId; textSize: number; showSuite: boolean }
+export type ButtonStyle = SuiteButton & { labelOverride: string }
+export type ButtonAction = {
+	id: string
+	controlId: string
+	options: { suite?: unknown; labelOverride?: unknown; textSize?: unknown; showSuite?: unknown }
+}
+
+// The suite, label override, text size and suite dot every labelled action shares.
+export function buttonStyle(options: ButtonAction['options']): ButtonStyle {
+	return {
+		suite: suiteId(options.suite),
+		labelOverride: typeof options.labelOverride === 'string' ? options.labelOverride.trim() : '',
+		textSize: textScale(options.textSize),
+		showSuite: options.showSuite !== false,
+	}
+}
+
 // Keep all action instances so removing one restores the remaining assignment
 // instead of clearing the whole button.
-class ButtonAssignments<T> extends Map<string, T> {
-	private readonly assignments = new Map<string, Map<string, T>>()
+export class ButtonAssignments<T> extends Map<string, ButtonStyle & T> {
+	private readonly assignments = new Map<string, Map<string, ButtonStyle & T>>()
 
-	setAction(controlId: string, actionId: string, value: T): void {
-		const actions = this.assignments.get(controlId) ?? new Map<string, T>()
+	constructor(readonly feedbackId: keyof FeedbacksSchema) {
+		super()
+	}
+
+	setAction(controlId: string, actionId: string, value: ButtonStyle & T): void {
+		const actions = this.assignments.get(controlId) ?? new Map<string, ButtonStyle & T>()
 		actions.set(actionId, value)
 		this.assignments.set(controlId, actions)
-		this.set(controlId, primaryAction(actions) as T)
+		this.set(controlId, primaryAction(actions) as ButtonStyle & T)
 	}
 
 	deleteAction(controlId: string, actionId: string): void {
@@ -77,7 +99,7 @@ class ButtonAssignments<T> extends Map<string, T> {
 			this.assignments.delete(controlId)
 			this.delete(controlId)
 		} else {
-			this.set(controlId, primaryAction(actions) as T)
+			this.set(controlId, primaryAction(actions) as ButtonStyle & T)
 		}
 	}
 }
@@ -87,104 +109,28 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	readonly suiteStates = Object.fromEntries(
 		SUITES.map((id) => [id, { status: 'disconnected', frameVersion: '', protocolName: '', heartbeatFlash: false }]),
 	) as Record<SuiteId, SuiteState>
-	readonly macroButtons = new ButtonAssignments<{
-		suite: SuiteId
-		macro: number
-		labelOverride: string
-		textSize: number
-		showSuite: boolean
-	}>()
-	readonly auxButtons = new ButtonAssignments<{
-		suite: SuiteId
-		aux: number
-		source: number
-		labelOverride: string
-		textSize: number
-		showSuite: boolean
-	}>()
-	readonly crosspointButtons = new ButtonAssignments<{
-		suite: SuiteId
-		target: string
-		source: number
-		labelOverride: string
-		textSize: number
-		showSuite: boolean
-	}>()
-	readonly imageStoreButtons = new ButtonAssignments<{
-		suite: SuiteId
-		output: number
-		image: number
-		labelOverride: string
-		textSize: number
-		showSuite: boolean
-	}>()
-	readonly imageStoreInputButtons = new ButtonAssignments<{
-		suite: SuiteId
-		source: number
-		labelOverride: string
-		textSize: number
-		showSuite: boolean
-	}>()
+	readonly macroButtons = new ButtonAssignments<{ macro: number }>('macro_button_state')
+	readonly auxButtons = new ButtonAssignments<{ aux: number; source: number }>('aux_button_state')
+	readonly crosspointButtons = new ButtonAssignments<{ target: string; source: number }>('crosspoint_button_state')
+	readonly imageStoreButtons = new ButtonAssignments<{ output: number; image: number }>('image_store_button_state')
+	readonly imageStoreInputButtons = new ButtonAssignments<{ source: number }>('image_store_input_state')
 	readonly actionLabelButtons = new ButtonAssignments<{
-		suite: SuiteId
 		kind: 'macro_stop' | 'run' | 'timeline_edit'
 		macro: number
 		target: string
 		command: string
-		labelOverride: string
-		textSize: number
-		showSuite: boolean
-	}>()
-	readonly panelMemoryButtons = new ButtonAssignments<{
-		suite: SuiteId
-		register: number
-		labelOverride: string
-		textSize: number
-		showSuite: boolean
-	}>()
-	readonly gpiButtons = new ButtonAssignments<{
-		suite: SuiteId
-		gpi: number
-		labelOverride: string
-		textSize: number
-		showSuite: boolean
-	}>()
-	readonly pbusButtons = new ButtonAssignments<{
-		suite: SuiteId
-		pbus: number
-		command: 'recall' | 'trigger'
-		value: number
-		labelOverride: string
-		textSize: number
-		showSuite: boolean
-	}>()
-	readonly mappingButtons = new ButtonAssignments<{
-		suite: SuiteId
-		bus: string
-		shift: number
-		button: number
-		source: number
-		labelOverride: string
-		textSize: number
-		showSuite: boolean
-	}>()
-	readonly ememButtons = new ButtonAssignments<{
-		suite: SuiteId
-		target: string
-		register: number
-		labelOverride: string
-		textSize: number
-		showSuite: boolean
-	}>()
-	readonly transitionButtons = new ButtonAssignments<{
-		suite: SuiteId
-		target: string
-		transition: string
-		labelOverride: string
-		textSize: number
-		showSuite: boolean
-	}>()
-	readonly suiteButtons = new Map<string, Map<string, { suite: SuiteId; textSize: number; showSuite: boolean }>>()
+	}>('action_label')
+	readonly panelMemoryButtons = new ButtonAssignments<{ register: number }>('panel_memory_button_state')
+	readonly gpiButtons = new ButtonAssignments<{ gpi: number }>('gpi_button_state')
+	readonly pbusButtons = new ButtonAssignments<{ pbus: number; command: 'recall' | 'trigger'; value: number }>(
+		'pbus_button_state',
+	)
+	readonly mappingButtons = new ButtonAssignments<{ bus: string; shift: number; button: number; source: number }>(
+		'button_mapping_state',
+	)
+	readonly ememButtons = new ButtonAssignments<{ target: string; register: number }>('emem_button_state')
+	readonly transitionButtons = new ButtonAssignments<{ target: string; transition: string }>('transition_button_state')
+	readonly suiteButtons = new Map<string, Map<string, SuiteButton>>()
 	private sourceRefreshTimer?: NodeJS.Timeout
 	private macroCatalogRefreshTimer?: NodeJS.Timeout
 	private macroFlashTimer?: NodeJS.Timeout
@@ -689,374 +635,29 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		if (!result.success) this.log('warn', result.message)
 	}
 
-	trackMacroButton(
-		controlId: string,
-		suite: unknown,
-		macro: unknown,
-		labelOverride: unknown = '',
-		textSize: unknown = 100,
-		showSuite: unknown = true,
-		actionId: string = 'macro_play',
-	): void {
-		const targetSuite = suiteId(suite)
-		this.macroButtons.setAction(controlId, actionId, {
-			suite: targetSuite,
-			macro: Number(macro) || 1,
-			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
-			textSize: textScale(textSize),
-			showSuite: showSuite !== false,
-		})
-		this.trackSuiteButton(controlId, actionId, targetSuite, textSize, showSuite)
-		this.checkFeedbacks('macro_button_state')
+	// Every labelled action records its button's assignment here; the matching
+	// feedback reads it back to draw the label, badge and tally.
+	trackButton<T>(assignments: ButtonAssignments<T>, action: ButtonAction, fields: T): void {
+		const style = buttonStyle(action.options)
+		assignments.setAction(action.controlId, action.id, { ...style, ...fields })
+		this.trackSuiteButton(action.controlId, action.id, style)
+		this.checkFeedbacks(assignments.feedbackId)
 	}
 
-	untrackMacroButton(controlId: string, actionId: string = 'macro_play'): void {
-		this.macroButtons.deleteAction(controlId, actionId)
-		this.untrackSuiteButton(controlId, actionId)
-		this.checkFeedbacks('macro_button_state')
+	untrackButton<T>(assignments: ButtonAssignments<T>, action: { id: string; controlId: string }): void {
+		assignments.deleteAction(action.controlId, action.id)
+		this.untrackSuiteButton(action.controlId, action.id)
+		this.checkFeedbacks(assignments.feedbackId)
 	}
 
-	trackAuxButton(
-		controlId: string,
-		suite: unknown,
-		aux: unknown,
-		source: unknown,
-		labelOverride: unknown = '',
-		textSize: unknown = 100,
-		showSuite: unknown = true,
-		actionId: string = 'aux_route',
-	): void {
-		const targetSuite = suiteId(suite)
-		this.auxButtons.setAction(controlId, actionId, {
-			suite: targetSuite,
-			aux: Number(aux) || 1,
-			source: Number(source) || 1,
-			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
-			textSize: textScale(textSize),
-			showSuite: showSuite !== false,
-		})
-		this.trackSuiteButton(controlId, actionId, targetSuite, textSize, showSuite)
-		this.checkFeedbacks('aux_button_state')
-	}
-
-	trackCrosspointButton(
-		controlId: string,
-		suite: unknown,
-		target: unknown,
-		source: unknown,
-		labelOverride: unknown = '',
-		textSize: unknown = 100,
-		showSuite: unknown = true,
-		actionId: string = 'crosspoint',
-	): void {
-		const targetSuite = suiteId(suite)
-		this.crosspointButtons.setAction(controlId, actionId, {
-			suite: targetSuite,
-			target: String(target),
-			source: Number(source) || 1,
-			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
-			textSize: textScale(textSize),
-			showSuite: showSuite !== false,
-		})
-		this.trackSuiteButton(controlId, actionId, targetSuite, textSize, showSuite)
-		this.checkFeedbacks('crosspoint_button_state')
-	}
-
-	untrackCrosspointButton(controlId: string, actionId: string = 'crosspoint'): void {
-		this.crosspointButtons.deleteAction(controlId, actionId)
-		this.untrackSuiteButton(controlId, actionId)
-		this.checkFeedbacks('crosspoint_button_state')
-	}
-
-	untrackAuxButton(controlId: string, actionId: string = 'aux_route'): void {
-		this.auxButtons.deleteAction(controlId, actionId)
-		this.untrackSuiteButton(controlId, actionId)
-		this.checkFeedbacks('aux_button_state')
-	}
-
-	trackImageStoreButton(
-		controlId: string,
-		suite: unknown,
-		output: unknown,
-		image: unknown,
-		labelOverride: unknown = '',
-		textSize: unknown = 100,
-		showSuite: unknown = true,
-		actionId: string = 'image_store',
-	): void {
-		const targetSuite = suiteId(suite)
-		this.imageStoreButtons.setAction(controlId, actionId, {
-			suite: targetSuite,
-			output: Number(output) || 1,
-			image: Number(image) || 1,
-			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
-			textSize: textScale(textSize),
-			showSuite: showSuite !== false,
-		})
-		this.trackSuiteButton(controlId, actionId, targetSuite, textSize, showSuite)
-		this.checkFeedbacks('image_store_button_state')
-	}
-
-	untrackImageStoreButton(controlId: string, actionId: string = 'image_store'): void {
-		this.imageStoreButtons.deleteAction(controlId, actionId)
-		this.untrackSuiteButton(controlId, actionId)
-		this.checkFeedbacks('image_store_button_state')
-	}
-
-	trackImageStoreInputButton(
-		controlId: string,
-		suite: unknown,
-		source: unknown,
-		labelOverride: unknown = '',
-		textSize: unknown = 100,
-		showSuite: unknown = true,
-		actionId: string = 'image_store_input',
-	): void {
-		const targetSuite = suiteId(suite)
-		this.imageStoreInputButtons.setAction(controlId, actionId, {
-			suite: targetSuite,
-			source: Number(source) || 1,
-			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
-			textSize: textScale(textSize),
-			showSuite: showSuite !== false,
-		})
-		this.trackSuiteButton(controlId, actionId, targetSuite, textSize, showSuite)
-		this.checkFeedbacks('image_store_input_state')
-	}
-
-	untrackImageStoreInputButton(controlId: string, actionId: string = 'image_store_input'): void {
-		this.imageStoreInputButtons.deleteAction(controlId, actionId)
-		this.untrackSuiteButton(controlId, actionId)
-		this.checkFeedbacks('image_store_input_state')
-	}
-
-	trackActionLabelButton(
-		controlId: string,
-		actionId: string,
-		kind: 'macro_stop' | 'run' | 'timeline_edit',
-		options: {
-			suite?: unknown
-			value?: unknown
-			target?: unknown
-			command?: unknown
-			labelOverride?: unknown
-			textSize?: unknown
-			showSuite?: unknown
-		},
-	): void {
-		const targetSuite = suiteId(options.suite)
-		this.actionLabelButtons.setAction(controlId, actionId, {
-			suite: targetSuite,
-			kind,
-			macro: Number(options.value) || 1,
-			target: typeof options.target === 'string' ? options.target : 'MASTER',
-			command: typeof options.command === 'string' ? options.command : '',
-			labelOverride: typeof options.labelOverride === 'string' ? options.labelOverride.trim() : '',
-			textSize: textScale(options.textSize ?? 100),
-			showSuite: options.showSuite !== false,
-		})
-		this.trackSuiteButton(controlId, actionId, targetSuite, options.textSize ?? 100, options.showSuite ?? true)
-		this.checkFeedbacks('action_label')
-	}
-
-	untrackActionLabelButton(controlId: string, actionId: string): void {
-		this.actionLabelButtons.deleteAction(controlId, actionId)
-		this.untrackSuiteButton(controlId, actionId)
-		this.checkFeedbacks('action_label')
-	}
-
-	trackPanelMemoryButton(
-		controlId: string,
-		suite: unknown,
-		register: unknown,
-		labelOverride: unknown = '',
-		textSize: unknown = 100,
-		showSuite: unknown = true,
-		actionId: string = 'panel_memory',
-	): void {
-		const targetSuite = suiteId(suite)
-		this.panelMemoryButtons.setAction(controlId, actionId, {
-			suite: targetSuite,
-			register: Number(register) || 1,
-			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
-			textSize: textScale(textSize),
-			showSuite: showSuite !== false,
-		})
-		this.trackSuiteButton(controlId, actionId, targetSuite, textSize, showSuite)
-		this.checkFeedbacks('panel_memory_button_state')
-	}
-
-	untrackPanelMemoryButton(controlId: string, actionId: string = 'panel_memory'): void {
-		this.panelMemoryButtons.deleteAction(controlId, actionId)
-		this.untrackSuiteButton(controlId, actionId)
-		this.checkFeedbacks('panel_memory_button_state')
-	}
-
-	trackGpiButton(
-		controlId: string,
-		suite: unknown,
-		gpi: unknown,
-		labelOverride: unknown = '',
-		textSize: unknown = 100,
-		showSuite: unknown = true,
-		actionId: string = 'gpi',
-	): void {
-		const targetSuite = suiteId(suite)
-		this.gpiButtons.setAction(controlId, actionId, {
-			suite: targetSuite,
-			gpi: Number(gpi) || 1,
-			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
-			textSize: textScale(textSize),
-			showSuite: showSuite !== false,
-		})
-		this.trackSuiteButton(controlId, actionId, targetSuite, textSize, showSuite)
-		this.checkFeedbacks('gpi_button_state')
-	}
-
-	untrackGpiButton(controlId: string, actionId: string = 'gpi'): void {
-		this.gpiButtons.deleteAction(controlId, actionId)
-		this.untrackSuiteButton(controlId, actionId)
-		this.checkFeedbacks('gpi_button_state')
-	}
-
-	trackPbusButton(
-		controlId: string,
-		suite: unknown,
-		command: 'recall' | 'trigger',
-		pbus: unknown,
-		value: unknown,
-		labelOverride: unknown = '',
-		textSize: unknown = 100,
-		showSuite: unknown = true,
-		actionId: string = `pbus_${command}`,
-	): void {
-		const targetSuite = suiteId(suite)
-		const number = Number(value)
-		this.pbusButtons.setAction(controlId, actionId, {
-			suite: targetSuite,
-			pbus: Number(pbus) || 1,
-			command,
-			value: Number.isInteger(number) && number >= 0 ? number : 0,
-			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
-			textSize: textScale(textSize),
-			showSuite: showSuite !== false,
-		})
-		this.trackSuiteButton(controlId, actionId, targetSuite, textSize, showSuite)
-		this.checkFeedbacks('pbus_button_state')
-	}
-
-	untrackPbusButton(controlId: string, actionId: string): void {
-		this.pbusButtons.deleteAction(controlId, actionId)
-		this.untrackSuiteButton(controlId, actionId)
-		this.checkFeedbacks('pbus_button_state')
-	}
-
-	trackMappingButton(
-		controlId: string,
-		suite: unknown,
-		bus: unknown,
-		shift: unknown,
-		button: unknown,
-		source: unknown,
-		labelOverride: unknown = '',
-		textSize: unknown = 100,
-		showSuite: unknown = true,
-		actionId: string = 'button_mapping',
-	): void {
-		const targetSuite = suiteId(suite)
-		this.mappingButtons.setAction(controlId, actionId, {
-			suite: targetSuite,
-			bus: String(bus),
-			shift: Number(shift) || 1,
-			button: Number(button) || 1,
-			source: Number(source) || 1,
-			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
-			textSize: textScale(textSize),
-			showSuite: showSuite !== false,
-		})
-		this.trackSuiteButton(controlId, actionId, targetSuite, textSize, showSuite)
-		this.checkFeedbacks('button_mapping_state')
-	}
-
-	untrackMappingButton(controlId: string, actionId: string = 'button_mapping'): void {
-		this.mappingButtons.deleteAction(controlId, actionId)
-		this.untrackSuiteButton(controlId, actionId)
-		this.checkFeedbacks('button_mapping_state')
-	}
-
-	trackTransitionButton(
-		controlId: string,
-		suite: unknown,
-		target: unknown,
-		transition: unknown,
-		labelOverride: unknown = '',
-		textSize: unknown = 100,
-		showSuite: unknown = true,
-		actionId: string = 'transition',
-	): void {
-		const targetSuite = suiteId(suite)
-		this.transitionButtons.setAction(controlId, actionId, {
-			suite: targetSuite,
-			target: String(target),
-			transition: String(transition),
-			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
-			textSize: textScale(textSize),
-			showSuite: showSuite !== false,
-		})
-		this.trackSuiteButton(controlId, actionId, targetSuite, textSize, showSuite)
-		this.checkFeedbacks('transition_button_state')
-	}
-
-	untrackTransitionButton(controlId: string, actionId: string = 'transition'): void {
-		this.transitionButtons.deleteAction(controlId, actionId)
-		this.untrackSuiteButton(controlId, actionId)
-		this.checkFeedbacks('transition_button_state')
-	}
-
-	trackEmemButton(
-		controlId: string,
-		suite: unknown,
-		target: unknown,
-		register: unknown,
-		labelOverride: unknown = '',
-		textSize: unknown = 100,
-		showSuite: unknown = true,
-		actionId: string = 'emem',
-	): void {
-		const targetSuite = suiteId(suite)
-		this.ememButtons.setAction(controlId, actionId, {
-			suite: targetSuite,
-			target: String(target),
-			register: Number(register) || 0,
-			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
-			textSize: textScale(textSize),
-			showSuite: showSuite !== false,
-		})
-		this.trackSuiteButton(controlId, actionId, targetSuite, textSize, showSuite)
-		this.checkFeedbacks('emem_button_state')
-	}
-
-	untrackEmemButton(controlId: string, actionId: string = 'emem'): void {
-		this.ememButtons.deleteAction(controlId, actionId)
-		this.untrackSuiteButton(controlId, actionId)
-		this.checkFeedbacks('emem_button_state')
-	}
-
-	trackSuiteButton(
-		controlId: string,
-		actionId: string,
-		suite: unknown,
-		textSize: unknown = 100,
-		showSuite: unknown = true,
-	): void {
-		const actions =
-			this.suiteButtons.get(controlId) ?? new Map<string, { suite: SuiteId; textSize: number; showSuite: boolean }>()
-		actions.set(actionId, { suite: suiteId(suite), textSize: textScale(textSize), showSuite: showSuite !== false })
+	trackSuiteButton(controlId: string, actionId: string, { suite, textSize, showSuite }: SuiteButton): void {
+		const actions = this.suiteButtons.get(controlId) ?? new Map<string, SuiteButton>()
+		actions.set(actionId, { suite, textSize, showSuite })
 		this.suiteButtons.set(controlId, actions)
 		this.checkFeedbacks('suite_badge')
 	}
 
-	primarySuiteButton(controlId: string): { suite: SuiteId; textSize: number; showSuite: boolean } | undefined {
+	primarySuiteButton(controlId: string): SuiteButton | undefined {
 		return primaryAction(this.suiteButtons.get(controlId))
 	}
 
