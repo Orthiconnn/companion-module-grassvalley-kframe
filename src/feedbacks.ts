@@ -1,6 +1,7 @@
 import type ModuleInstance from './main.js'
 import { suiteId, suiteNumber, suitePorts } from './main.js'
 import { CLEAR_BADGE, labeledButtonSvg, SUITE_BADGES, timelineProgressSvg } from './badges.js'
+import { PBUS_TRIGGERS } from './legacy-actions.js'
 
 type SuiteOptions = { suite?: string }
 export type FeedbacksSchema = {
@@ -11,8 +12,12 @@ export type FeedbacksSchema = {
 	aux_button_state: { type: 'advanced'; options: { automaticLabel: boolean } }
 	crosspoint_button_state: { type: 'advanced'; options: { automaticLabel: boolean } }
 	image_store_button_state: { type: 'advanced'; options: { automaticLabel: boolean } }
+	image_store_input_state: { type: 'advanced'; options: { automaticLabel: boolean } }
+	action_label: { type: 'advanced'; options: { automaticLabel: boolean } }
 	panel_memory_button_state: { type: 'advanced'; options: { automaticLabel: boolean } }
 	gpi_button_state: { type: 'advanced'; options: Record<string, never> }
+	pbus_button_state: { type: 'advanced'; options: { automaticLabel: boolean } }
+	button_mapping_state: { type: 'advanced'; options: { automaticLabel: boolean } }
 	transition_button_state: { type: 'advanced'; options: Record<string, never> }
 	emem_button_state: { type: 'advanced'; options: Record<string, never> }
 	timeline_progress: { type: 'advanced'; options: SuiteOptions }
@@ -30,6 +35,27 @@ const suiteOption = {
 		{ id: 'suite3a', label: 'Suite 3' },
 		{ id: 'suite4a', label: 'Suite 4' },
 	],
+}
+
+export const TIMELINE_EDIT_LABELS: Record<string, string> = {
+	previous: 'PREVIOUS',
+	next: 'NEXT',
+	insert_before: 'INSERT\nBEFORE',
+	insert_after: 'INSERT\nAFTER',
+	go_beginning: 'GO TO\nBEGINNING',
+	go_end: 'GO TO\nEND',
+	mod: 'MOD',
+	mod_all: 'MOD ALL',
+	mod_all_absolute: 'MOD ALL\nABSOLUTE',
+}
+
+const MAPPING_BUS_LABELS: Record<string, string> = {
+	program: 'PGM',
+	me1: 'ME1',
+	me2: 'ME2',
+	me3: 'ME3',
+	me4: 'ME4',
+	aux: 'AUX',
 }
 
 export function UpdateFeedbacks(self: ModuleInstance): void {
@@ -239,7 +265,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 			},
 		},
 		image_store_button_state: {
-			name: 'Image Store output and loaded still label',
+			name: 'Image Store output and still label, with loaded tally',
 			type: 'advanced',
 			options: [
 				{ id: 'automaticLabel', type: 'checkbox', label: 'Automatically show output and still', default: true },
@@ -248,8 +274,10 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				const assignment = self.imageStoreButtons.get(feedback.controlId)
 				if (!assignment) return {}
 				const liveImage = self.protocol.getImageStoreImage(self.connectionId(assignment.suite), assignment.output)
-				const image = liveImage ?? assignment.image
-				const label = assignment.labelOverride || String(image).padStart(4, '0')
+				// The label is the still this button loads; the tally shows the frame already has it on that output.
+				const loaded = liveImage === assignment.image
+				const label = assignment.labelOverride || String(assignment.image).padStart(4, '0')
+				const color = loaded ? 0x000000 : 0xffffff
 				return {
 					...(feedback.options.automaticLabel ? { text: '' } : {}),
 					png64: feedback.options.automaticLabel
@@ -257,7 +285,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 								suiteNumber(assignment.suite),
 								`IS${assignment.output}`,
 								label,
-								0xffffff,
+								color,
 								undefined,
 								assignment.textSize,
 								assignment.showSuite,
@@ -266,6 +294,28 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 							? SUITE_BADGES[suiteNumber(assignment.suite)]
 							: CLEAR_BADGE,
 					pngalignment: feedback.options.automaticLabel ? 'center:bottom' : 'left:bottom',
+					bgcolor: loaded ? 0xb9a3e3 : 0x6a4c93,
+					color,
+				}
+			},
+		},
+		image_store_input_state: {
+			name: 'Image Store input source name or label override',
+			type: 'advanced',
+			options: [{ id: 'automaticLabel', type: 'checkbox', label: 'Automatically show input source', default: true }],
+			callback: (feedback) => {
+				const assignment = self.imageStoreInputButtons.get(feedback.controlId)
+				if (!assignment) return {}
+				const sourceName = self.protocol.resolveSourceDisplayName(
+					self.connectionId(assignment.suite),
+					assignment.source,
+				)
+				const label = assignment.labelOverride || sourceName || String(assignment.source)
+				return {
+					...(feedback.options.automaticLabel ? { text: `IMAGE IN\n${label}` } : {}),
+					png64: assignment.showSuite ? SUITE_BADGES[suiteNumber(assignment.suite)] : CLEAR_BADGE,
+					pngalignment: 'left:bottom',
+					size: Math.round(10 * assignment.textSize),
 				}
 			},
 		},
@@ -307,6 +357,47 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				if (!assignment) return {}
 				return {
 					text: assignment.labelOverride || `GPI\n${assignment.gpi}`,
+					png64: assignment.showSuite ? SUITE_BADGES[suiteNumber(assignment.suite)] : CLEAR_BADGE,
+					pngalignment: 'left:bottom',
+					size: Math.round(10 * assignment.textSize),
+				}
+			},
+		},
+		pbus_button_state: {
+			name: 'PBUS register/trigger or label override',
+			type: 'advanced',
+			options: [
+				{ id: 'automaticLabel', type: 'checkbox', label: 'Automatically show PBUS register or trigger', default: true },
+			],
+			callback: (feedback) => {
+				const assignment = self.pbusButtons.get(feedback.controlId)
+				if (!assignment) return {}
+				const automaticText = `PBUS ${assignment.pbus}\n${
+					assignment.command === 'recall'
+						? `RECALL ${assignment.value}`
+						: (PBUS_TRIGGERS[assignment.value]?.short ?? `TRIGGER ${assignment.value}`)
+				}`
+				return {
+					...(feedback.options.automaticLabel ? { text: assignment.labelOverride || automaticText } : {}),
+					png64: assignment.showSuite ? SUITE_BADGES[suiteNumber(assignment.suite)] : CLEAR_BADGE,
+					pngalignment: 'left:bottom',
+					size: Math.round(10 * assignment.textSize),
+				}
+			},
+		},
+		button_mapping_state: {
+			name: 'Button mapping bus/shift/button/source or label override',
+			type: 'advanced',
+			options: [
+				{ id: 'automaticLabel', type: 'checkbox', label: 'Automatically show mapping and source', default: true },
+			],
+			callback: (feedback) => {
+				const assignment = self.mappingButtons.get(feedback.controlId)
+				if (!assignment) return {}
+				const bus = MAPPING_BUS_LABELS[assignment.bus] ?? assignment.bus.toUpperCase()
+				const automaticText = `${bus} MAP\nS${assignment.shift} B${assignment.button}→${assignment.source}`
+				return {
+					...(feedback.options.automaticLabel ? { text: assignment.labelOverride || automaticText } : {}),
 					png64: assignment.showSuite ? SUITE_BADGES[suiteNumber(assignment.suite)] : CLEAR_BADGE,
 					pngalignment: 'left:bottom',
 					size: Math.round(10 * assignment.textSize),
@@ -432,7 +523,11 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				const suite = tracked?.suite ?? suiteId(feedback.options.suite)
 				const actionTextSize = tracked?.textSize ?? 1
 				const showSuite = tracked?.showSuite !== false
-				const state = self.protocol.getTimelineState(self.connectionId(suite))
+				// Only the master timeline reports progress; a Run button aimed at an M/E
+				// or eDPM timeline would otherwise show the master's bar.
+				const run = self.actionLabelButtons.get(feedback.controlId)
+				const masterTimeline = run?.kind !== 'run' || run.target === 'MASTER'
+				const state = masterTimeline ? self.protocol.getTimelineState(self.connectionId(suite)) : undefined
 				if (
 					state?.duration === null ||
 					state?.duration === undefined ||
@@ -457,6 +552,32 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					pngalignment: 'center:bottom',
 					size: Math.round(10 * actionTextSize),
 				}
+			},
+		},
+		action_label: {
+			name: 'Macro Stop / Timeline Run / Timeline Edit label or label override',
+			type: 'advanced',
+			options: [
+				{
+					id: 'automaticLabel',
+					type: 'checkbox',
+					label: 'Automatically show macro, target, and command',
+					default: true,
+				},
+			],
+			callback: (feedback) => {
+				const assignment = self.actionLabelButtons.get(feedback.controlId)
+				if (!assignment || !feedback.options.automaticLabel) return {}
+				const target = assignment.target === 'MASTER' ? 'MASTER' : assignment.target.replace('-', ' ')
+				let text: string
+				if (assignment.kind === 'macro_stop')
+					text = `STOP\n${assignment.labelOverride || self.macroDisplayName(assignment.suite, assignment.macro).toUpperCase()}`
+				else if (assignment.kind === 'run') text = assignment.labelOverride || `${target}\nRUN`
+				else {
+					const command = TIMELINE_EDIT_LABELS[assignment.command] ?? assignment.command.toUpperCase()
+					text = assignment.labelOverride || (assignment.target === 'MASTER' ? command : `${target}\n${command}`)
+				}
+				return { text, size: Math.round(10 * assignment.textSize) }
 			},
 		},
 		suite_badge: {

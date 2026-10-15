@@ -1,6 +1,6 @@
 import type ModuleInstance from './main.js'
 import { suiteId } from './main.js'
-import { buildButtonMapping, buildGpi, buildPbusRecall, buildPbusTrigger } from './legacy-actions.js'
+import { buildButtonMapping, buildGpi, buildPbusRecall, buildPbusTrigger, PBUS_TRIGGERS } from './legacy-actions.js'
 
 type SuiteOption = { suite?: string; textSize?: number; showSuite?: boolean }
 type NumberOption = { options: SuiteOption & { value: number; labelOverride?: string } }
@@ -21,12 +21,14 @@ export type ActionsSchema = {
 	image_store: { options: SuiteOption & { output: number; image: number; labelOverride?: string } }
 	image_store_input: NumberOption
 	raw_cpl: { options: SuiteOption & { command: string } }
-	run: { options: SuiteOption & { target: string } }
-	timeline_edit: { options: SuiteOption & { target: string; command: string } }
+	run: { options: SuiteOption & { target: string; labelOverride?: string } }
+	timeline_edit: { options: SuiteOption & { target: string; command: string; labelOverride?: string } }
 	gpi: NumberOption
-	pbus_recall: { options: SuiteOption & { pbus: number; register: number } }
-	pbus_trigger: { options: SuiteOption & { pbus: number; trigger: number } }
-	button_mapping: { options: SuiteOption & { bus: string; shift: number; button: number; source: number } }
+	pbus_recall: { options: SuiteOption & { pbus: number; register: number; labelOverride?: string } }
+	pbus_trigger: { options: SuiteOption & { pbus: number; trigger: number; labelOverride?: string } }
+	button_mapping: {
+		options: SuiteOption & { bus: string; shift: number; button: number; source: number; labelOverride?: string }
+	}
 }
 
 const meIndexes: Record<string, number> = { PGM: 3, ME1: 0, ME2: 1, ME3: 2, ME4: 4 }
@@ -190,7 +192,6 @@ export function UpdateActions(self: ModuleInstance): void {
 		},
 		macro_stop: {
 			name: 'Macro: Stop',
-			...suiteSubscription,
 			options: [
 				suiteOption,
 				{
@@ -203,9 +204,13 @@ export function UpdateActions(self: ModuleInstance): void {
 					regex: '^([1-9]|[1-9][0-9]|[1-9][0-9]{2})$',
 					minChoicesForSearch: 8,
 				},
+				labelOverrideOption,
 				textSizeOption,
 				showSuiteOption,
 			],
+			optionsToMonitorForSubscribe: ['suite', 'value', 'labelOverride', 'textSize', 'showSuite'],
+			subscribe: (action) => self.trackActionLabelButton(action.controlId, action.id, 'macro_stop', action.options),
+			unsubscribe: (action) => self.untrackActionLabelButton(action.controlId, action.id),
 			callback: (e) => resultOrThrow(p.sendMacroStop(id(e), Number(e.options.value))),
 		},
 		macro_stop_all: {
@@ -447,7 +452,6 @@ export function UpdateActions(self: ModuleInstance): void {
 		},
 		image_store_input: {
 			name: 'Image Store: Select Input',
-			...suiteSubscription,
 			options: [
 				suiteOption,
 				{
@@ -460,9 +464,22 @@ export function UpdateActions(self: ModuleInstance): void {
 					regex: '^([1-9]|[1-9][0-9]|[1-7][0-9]{2}|8[0-4][0-9]|850)$',
 					minChoicesForSearch: 8,
 				},
+				labelOverrideOption,
 				textSizeOption,
 				showSuiteOption,
 			],
+			optionsToMonitorForSubscribe: ['suite', 'value', 'labelOverride', 'textSize', 'showSuite'],
+			subscribe: (action) =>
+				self.trackImageStoreInputButton(
+					action.controlId,
+					action.options.suite,
+					action.options.value,
+					action.options.labelOverride,
+					action.options.textSize,
+					action.options.showSuite,
+					action.id,
+				),
+			unsubscribe: (action) => self.untrackImageStoreInputButton(action.controlId, action.id),
 			callback: (e) => resultOrThrow(p.sendImageStoreInput(id(e), Number(e.options.value))),
 		},
 		raw_cpl: {
@@ -478,13 +495,16 @@ export function UpdateActions(self: ModuleInstance): void {
 		},
 		run: {
 			name: 'Timeline: RUN',
-			...suiteSubscription,
 			options: [
 				suiteOption,
 				{ id: 'target', type: 'dropdown', label: 'Target', default: 'MASTER', choices: timelineRunTargetChoices },
+				labelOverrideOption,
 				textSizeOption,
 				showSuiteOption,
 			],
+			optionsToMonitorForSubscribe: ['suite', 'target', 'labelOverride', 'textSize', 'showSuite'],
+			subscribe: (action) => self.trackActionLabelButton(action.controlId, action.id, 'run', action.options),
+			unsubscribe: (action) => self.untrackActionLabelButton(action.controlId, action.id),
 			callback: (e) => {
 				const target = String(e.options.target)
 				const [engine, partition] = target.split('-')
@@ -498,7 +518,6 @@ export function UpdateActions(self: ModuleInstance): void {
 		},
 		timeline_edit: {
 			name: 'Timeline: Edit / Navigate',
-			...suiteSubscription,
 			options: [
 				suiteOption,
 				{ id: 'target', type: 'dropdown', label: 'Target', default: 'MASTER', choices: timelineTargetChoices },
@@ -519,9 +538,13 @@ export function UpdateActions(self: ModuleInstance): void {
 						{ id: 'mod_all_absolute', label: 'Mod All Absolute' },
 					],
 				},
+				labelOverrideOption,
 				textSizeOption,
 				showSuiteOption,
 			],
+			optionsToMonitorForSubscribe: ['suite', 'target', 'command', 'labelOverride', 'textSize', 'showSuite'],
+			subscribe: (action) => self.trackActionLabelButton(action.controlId, action.id, 'timeline_edit', action.options),
+			unsubscribe: (action) => self.untrackActionLabelButton(action.controlId, action.id),
 			callback: (e) => {
 				const command = timelineCommands[String(e.options.command)]
 				if (!command) throw new Error('Invalid timeline command')
@@ -556,14 +579,28 @@ export function UpdateActions(self: ModuleInstance): void {
 		},
 		pbus_recall: {
 			name: 'PBUS: Recall Register',
-			...suiteSubscription,
 			options: [
 				suiteOption,
 				{ id: 'pbus', type: 'number', label: 'PBUS', default: 1, min: 1, max: 24 },
 				{ id: 'register', type: 'number', label: 'Register', default: 0, min: 0, max: 299 },
+				labelOverrideOption,
 				textSizeOption,
 				showSuiteOption,
 			],
+			optionsToMonitorForSubscribe: ['suite', 'pbus', 'register', 'labelOverride', 'textSize', 'showSuite'],
+			subscribe: (action) =>
+				self.trackPbusButton(
+					action.controlId,
+					action.options.suite,
+					'recall',
+					action.options.pbus,
+					action.options.register,
+					action.options.labelOverride,
+					action.options.textSize,
+					action.options.showSuite,
+					action.id,
+				),
+			unsubscribe: (action) => self.untrackPbusButton(action.controlId, action.id),
 			callback: async (e) => {
 				const commands = buildPbusRecall(Number(e.options.pbus), Number(e.options.register))
 				resultOrThrow(p.sendRawCommand(id(e), commands[0]))
@@ -573,14 +610,36 @@ export function UpdateActions(self: ModuleInstance): void {
 		},
 		pbus_trigger: {
 			name: 'PBUS: Fire Trigger',
-			...suiteSubscription,
 			options: [
 				suiteOption,
 				{ id: 'pbus', type: 'number', label: 'PBUS', default: 1, min: 1, max: 24 },
-				{ id: 'trigger', type: 'number', label: 'Trigger', default: 0, min: 0, max: 12 },
+				{
+					id: 'trigger',
+					type: 'dropdown',
+					label: 'Trigger (Lance TDC-100B functions)',
+					tooltip:
+						'The PBus device decides what each trigger does. These labels follow the Lance TDC-100B table (GVG mode).',
+					default: 0,
+					choices: PBUS_TRIGGERS.map(({ name }, trigger) => ({ id: trigger, label: `${trigger} — ${name}` })),
+				},
+				labelOverrideOption,
 				textSizeOption,
 				showSuiteOption,
 			],
+			optionsToMonitorForSubscribe: ['suite', 'pbus', 'trigger', 'labelOverride', 'textSize', 'showSuite'],
+			subscribe: (action) =>
+				self.trackPbusButton(
+					action.controlId,
+					action.options.suite,
+					'trigger',
+					action.options.pbus,
+					action.options.trigger,
+					action.options.labelOverride,
+					action.options.textSize,
+					action.options.showSuite,
+					action.id,
+				),
+			unsubscribe: (action) => self.untrackPbusButton(action.controlId, action.id),
 			callback: async (e) => {
 				const [clear, select, fire] = buildPbusTrigger(Number(e.options.pbus), Number(e.options.trigger))
 				for (const command of [clear, select, fire, clear]) {
@@ -591,7 +650,6 @@ export function UpdateActions(self: ModuleInstance): void {
 		},
 		button_mapping: {
 			name: 'Panel: Map Button to Source',
-			...suiteSubscription,
 			options: [
 				suiteOption,
 				{
@@ -620,9 +678,34 @@ export function UpdateActions(self: ModuleInstance): void {
 					regex: '^([1-9]|[1-9][0-9]|[1-7][0-9]{2}|80[0-9])$',
 					minChoicesForSearch: 8,
 				},
+				labelOverrideOption,
 				textSizeOption,
 				showSuiteOption,
 			],
+			optionsToMonitorForSubscribe: [
+				'suite',
+				'bus',
+				'shift',
+				'button',
+				'source',
+				'labelOverride',
+				'textSize',
+				'showSuite',
+			],
+			subscribe: (action) =>
+				self.trackMappingButton(
+					action.controlId,
+					action.options.suite,
+					action.options.bus,
+					action.options.shift,
+					action.options.button,
+					action.options.source,
+					action.options.labelOverride,
+					action.options.textSize,
+					action.options.showSuite,
+					action.id,
+				),
+			unsubscribe: (action) => self.untrackMappingButton(action.controlId, action.id),
 			callback: (e) =>
 				resultOrThrow(
 					p.sendRawCommand(

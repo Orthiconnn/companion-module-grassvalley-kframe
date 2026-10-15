@@ -118,6 +118,23 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		textSize: number
 		showSuite: boolean
 	}>()
+	readonly imageStoreInputButtons = new ButtonAssignments<{
+		suite: SuiteId
+		source: number
+		labelOverride: string
+		textSize: number
+		showSuite: boolean
+	}>()
+	readonly actionLabelButtons = new ButtonAssignments<{
+		suite: SuiteId
+		kind: 'macro_stop' | 'run' | 'timeline_edit'
+		macro: number
+		target: string
+		command: string
+		labelOverride: string
+		textSize: number
+		showSuite: boolean
+	}>()
 	readonly panelMemoryButtons = new ButtonAssignments<{
 		suite: SuiteId
 		register: number
@@ -128,6 +145,25 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	readonly gpiButtons = new ButtonAssignments<{
 		suite: SuiteId
 		gpi: number
+		labelOverride: string
+		textSize: number
+		showSuite: boolean
+	}>()
+	readonly pbusButtons = new ButtonAssignments<{
+		suite: SuiteId
+		pbus: number
+		command: 'recall' | 'trigger'
+		value: number
+		labelOverride: string
+		textSize: number
+		showSuite: boolean
+	}>()
+	readonly mappingButtons = new ButtonAssignments<{
+		suite: SuiteId
+		bus: string
+		shift: number
+		button: number
+		source: number
 		labelOverride: string
 		textSize: number
 		showSuite: boolean
@@ -271,7 +307,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			this.sourceRefreshTimer = undefined
 			this.updateActions()
 			this.updatePresets()
-			this.checkFeedbacks('aux_button_state', 'crosspoint_button_state')
+			this.checkFeedbacks('aux_button_state', 'crosspoint_button_state', 'image_store_input_state')
 		}, 100)
 	}
 
@@ -418,7 +454,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		} else if (type === 'MACRO_CATALOG_READY') {
 			this.updateActions()
 			this.updatePresets()
-			this.checkFeedbacks('macro_button_state')
+			this.checkFeedbacks('macro_button_state', 'action_label')
 			// Companion can have an action editor open while the bulk catalog is
 			// settling. Publish the completed choices once more on the next turn so
 			// the editor receives the final named list, not its initial fallback.
@@ -532,8 +568,8 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 				id,
 				{ mainPort, listenerPort },
 				`Suite ${suiteNumber(id)}`,
-				'2026.0.9.3',
-				'Oct 14 2026',
+				'2026.0.9.4',
+				'Oct 15 2026',
 			)
 			if (
 				this.shuttingDown ||
@@ -767,6 +803,68 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.checkFeedbacks('image_store_button_state')
 	}
 
+	trackImageStoreInputButton(
+		controlId: string,
+		suite: unknown,
+		source: unknown,
+		labelOverride: unknown = '',
+		textSize: unknown = 100,
+		showSuite: unknown = true,
+		actionId: string = 'image_store_input',
+	): void {
+		const targetSuite = suiteId(suite)
+		this.imageStoreInputButtons.setAction(controlId, actionId, {
+			suite: targetSuite,
+			source: Number(source) || 1,
+			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
+			textSize: textScale(textSize),
+			showSuite: showSuite !== false,
+		})
+		this.trackSuiteButton(controlId, actionId, targetSuite, textSize, showSuite)
+		this.checkFeedbacks('image_store_input_state')
+	}
+
+	untrackImageStoreInputButton(controlId: string, actionId: string = 'image_store_input'): void {
+		this.imageStoreInputButtons.deleteAction(controlId, actionId)
+		this.untrackSuiteButton(controlId, actionId)
+		this.checkFeedbacks('image_store_input_state')
+	}
+
+	trackActionLabelButton(
+		controlId: string,
+		actionId: string,
+		kind: 'macro_stop' | 'run' | 'timeline_edit',
+		options: {
+			suite?: unknown
+			value?: unknown
+			target?: unknown
+			command?: unknown
+			labelOverride?: unknown
+			textSize?: unknown
+			showSuite?: unknown
+		},
+	): void {
+		const targetSuite = suiteId(options.suite)
+		this.actionLabelButtons.setAction(controlId, actionId, {
+			suite: targetSuite,
+			kind,
+			macro: Number(options.value) || 1,
+			target: typeof options.target === 'string' ? options.target : 'MASTER',
+			command: typeof options.command === 'string' ? options.command : '',
+			labelOverride: typeof options.labelOverride === 'string' ? options.labelOverride.trim() : '',
+			textSize: textScale(options.textSize ?? 100),
+			showSuite: options.showSuite !== false,
+		})
+		this.trackSuiteButton(controlId, actionId, targetSuite, options.textSize ?? 100, options.showSuite ?? true)
+		this.checkFeedbacks('action_label')
+	}
+
+	untrackActionLabelButton(controlId: string, actionId: string): void {
+		this.actionLabelButtons.deleteAction(controlId, actionId)
+		this.untrackSuiteButton(controlId, actionId)
+		this.checkFeedbacks('action_label')
+	}
+
 	trackPanelMemoryButton(
 		controlId: string,
 		suite: unknown,
@@ -819,6 +917,71 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.gpiButtons.deleteAction(controlId, actionId)
 		this.untrackSuiteButton(controlId, actionId)
 		this.checkFeedbacks('gpi_button_state')
+	}
+
+	trackPbusButton(
+		controlId: string,
+		suite: unknown,
+		command: 'recall' | 'trigger',
+		pbus: unknown,
+		value: unknown,
+		labelOverride: unknown = '',
+		textSize: unknown = 100,
+		showSuite: unknown = true,
+		actionId: string = `pbus_${command}`,
+	): void {
+		const targetSuite = suiteId(suite)
+		const number = Number(value)
+		this.pbusButtons.setAction(controlId, actionId, {
+			suite: targetSuite,
+			pbus: Number(pbus) || 1,
+			command,
+			value: Number.isInteger(number) && number >= 0 ? number : 0,
+			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
+			textSize: textScale(textSize),
+			showSuite: showSuite !== false,
+		})
+		this.trackSuiteButton(controlId, actionId, targetSuite, textSize, showSuite)
+		this.checkFeedbacks('pbus_button_state')
+	}
+
+	untrackPbusButton(controlId: string, actionId: string): void {
+		this.pbusButtons.deleteAction(controlId, actionId)
+		this.untrackSuiteButton(controlId, actionId)
+		this.checkFeedbacks('pbus_button_state')
+	}
+
+	trackMappingButton(
+		controlId: string,
+		suite: unknown,
+		bus: unknown,
+		shift: unknown,
+		button: unknown,
+		source: unknown,
+		labelOverride: unknown = '',
+		textSize: unknown = 100,
+		showSuite: unknown = true,
+		actionId: string = 'button_mapping',
+	): void {
+		const targetSuite = suiteId(suite)
+		this.mappingButtons.setAction(controlId, actionId, {
+			suite: targetSuite,
+			bus: String(bus),
+			shift: Number(shift) || 1,
+			button: Number(button) || 1,
+			source: Number(source) || 1,
+			labelOverride: typeof labelOverride === 'string' ? labelOverride.trim() : '',
+			textSize: textScale(textSize),
+			showSuite: showSuite !== false,
+		})
+		this.trackSuiteButton(controlId, actionId, targetSuite, textSize, showSuite)
+		this.checkFeedbacks('button_mapping_state')
+	}
+
+	untrackMappingButton(controlId: string, actionId: string = 'button_mapping'): void {
+		this.mappingButtons.deleteAction(controlId, actionId)
+		this.untrackSuiteButton(controlId, actionId)
+		this.checkFeedbacks('button_mapping_state')
 	}
 
 	trackTransitionButton(
@@ -943,11 +1106,15 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			'connection_state',
 			'macro_active',
 			'macro_button_state',
+			'action_label',
 			'aux_button_state',
 			'crosspoint_button_state',
 			'image_store_button_state',
+			'image_store_input_state',
 			'panel_memory_button_state',
 			'gpi_button_state',
+			'pbus_button_state',
+			'button_mapping_state',
 			'transition_button_state',
 			'emem_button_state',
 			'timeline_progress',

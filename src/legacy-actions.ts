@@ -35,8 +35,33 @@ export function buildPbusRecall(pbus: number, register: number): [string, string
 	]
 }
 
+/**
+ * The frame sends PBus triggers 0-15; the device decides what each one does and
+ * Eng Setup names them per device. Names follow the Lance TDC-100B function table
+ * in GVG mode (TDC-100B manual p.15), the documented lab device.
+ */
+export const PBUS_TRIGGERS: readonly { name: string; short: string }[] = [
+	{ name: 'Normal Play', short: 'PLAY' },
+	{ name: 'Recue', short: 'RECUE' },
+	{ name: 'Variable Play (displayed speed)', short: 'VAR PLAY' },
+	{ name: 'Reverse Play at 100%', short: 'REV PLAY' },
+	{ name: 'Stop', short: 'STOP' },
+	{ name: 'Loop Play', short: 'LOOP' },
+	{ name: 'Record', short: 'RECORD' },
+	{ name: 'Normal Play', short: 'PLAY' },
+	{ name: 'Multi-Point Loop Start (loop inside points)', short: 'LOOP START' },
+	{ name: 'Multi-Point Loop Exit (play out to outside outpoint)', short: 'LOOP EXIT' },
+	{ name: 'Select Bank 0 (registers 000-099)', short: 'BANK 0' },
+	{ name: 'Select Bank 1 (registers 100-199)', short: 'BANK 1' },
+	{ name: 'Select Bank 2 (registers 200-299)', short: 'BANK 2' },
+	{ name: 'Normal Play', short: 'PLAY' },
+	{ name: 'Normal Play', short: 'PLAY' },
+	{ name: 'Normal Play', short: 'PLAY' },
+]
+
 export function buildPbusTrigger(pbus: number, trigger: number): [string, string, string] {
-	if (!Number.isInteger(trigger) || trigger < 0 || trigger > 12) throw new Error('Trigger must be 0–12')
+	if (!Number.isInteger(trigger) || trigger < 0 || trigger >= PBUS_TRIGGERS.length)
+		throw new Error(`Trigger must be 0–${PBUS_TRIGGERS.length - 1}`)
 	const index = pbus - 1
 	pbusCode(pbus)
 	const prefix = (Math.floor(index / 16) * 0x10).toString(16).padStart(2, '0')

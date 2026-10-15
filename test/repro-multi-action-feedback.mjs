@@ -13,7 +13,14 @@ const types = {
 	transition: ['transitionButtons', { target: 'ME1_PRI', transition: 'auto' }],
 	panel_memory: ['panelMemoryButtons', { value: 1 }],
 	image_store: ['imageStoreButtons', { output: 1, image: 1 }],
+	image_store_input: ['imageStoreInputButtons', { value: 1 }],
 	gpi: ['gpiButtons', { value: 1 }],
+	pbus_recall: ['pbusButtons', { pbus: 1, register: 0 }],
+	pbus_trigger: ['pbusButtons', { pbus: 1, trigger: 0 }],
+	macro_stop: ['actionLabelButtons', { value: 1 }],
+	run: ['actionLabelButtons', { target: 'MASTER' }],
+	timeline_edit: ['actionLabelButtons', { target: 'MASTER', command: 'next' }],
+	button_mapping: ['mappingButtons', { bus: 'program', shift: 1, button: 1, source: 1 }],
 }
 function setup() {
 	const module = new Module({ _isInstanceContext: true, id: 'subscription-review' })

@@ -167,4 +167,12 @@ export const UpgradeScripts: CompanionStaticUpgradeScript<ModuleConfig>[] = [
 			updatedFeedbacks: [],
 		}
 	},
+	// Index 4 ran on development installs only. Companion 5 upgrades actions and
+	// feedbacks in separate passes, so a feedback upgrade cannot tell which buttons
+	// hold PBUS actions. Intentionally empty.
+	(): CompanionStaticUpgradeResult<ModuleConfig, undefined> => ({
+		updatedConfig: null,
+		updatedActions: [],
+		updatedFeedbacks: [],
+	}),
 ]

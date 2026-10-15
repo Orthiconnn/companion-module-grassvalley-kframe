@@ -1,11 +1,11 @@
-# Grass Valley Kayenne Companion v2026.0.9.3
+# Grass Valley Kayenne Companion v2026.0.9.4
 
 Major-version Bitfocus Companion implementation based on the Grass Valley Stream Deck application.
 
 ## Versioning
 
-- Internal project version: `2026.0.9.3`
-- Companion prerelease package version: `2026.0.9-beta.3` (SemVer)
+- Internal project version: `2026.0.9.4`
+- Companion prerelease package version: `2026.0.9-beta.4` (SemVer)
 
 ## Source baseline
 
@@ -67,6 +67,17 @@ Manual and frame-initiated disconnects also refresh dropdowns and presets after 
 Disconnect cleanup also clears cached source names before announcing disconnection. AUX and crosspoint dropdowns then use remaining suites' source names or numbered fallback labels. The same four regression cases verify both source dropdowns and the cleared source-name getters.
 
 Validation on 2026-10-14: synthetic UDP and TCP packets reproduce the original stale-dropdown failure and pass after the fix. Tests cover dropdowns, presets, cleared names, unchanged batches, and disconnect cleanup in `test/repro-macro-dropdown.mjs`, included in `npm test`. Live frame names were not changed for this test.
+
+## 2026.0.9.4 button labels
+
+Every button whose action has a setting now shows that setting and updates when you change it. Each item has a regression test in `npm test` that fails against 2026.0.9.3. Checked in Companion 5.0.4 on a V18.1.0 lab frame: 32 buttons covering Macro Play/Stop/Stop All, AUX, crosspoint, Image Store output and input, Panel Memory, E-MEM, transition, Timeline Run and navigation, PBUS Recall, and GPI were pressed with no action errors, and the frame confirmed the AUX, crosspoint, E-MEM, and Image Store results through tally. Not pressed live: connection toggles, Timeline Insert/Mod (they edit the stored effect), button mapping (it rewrites panel mapping), and PBUS triggers.
+
+- PBUS: Recall buttons show the PBUS and register; Trigger buttons show the PBUS and the trigger's function, for example `PBUS 1 / STOP`. The trigger option is a 0–15 dropdown (the frame's 16 PBus triggers; previously 0–12) named from the Lance TDC-100B GVG-mode table: 0 Normal Play, 1 Recue, 2 Variable Play, 3 Reverse Play 100%, 4 Stop, 5 Loop Play, 6 Record, 7 Normal Play, 8 Multi-Point Loop Start, 9 Multi-Point Loop Exit, 10–12 Select Bank 0–2, 13–15 Normal Play. Other PBus devices define their own trigger functions.
+- Image Store: output buttons show the still they load and light up when the frame already has that still on that output (they used to show whatever still was loaded, so changing the image changed nothing). Input buttons show the selected source name or number.
+- Button mapping: buttons show the bus, shift, button, and mapped source.
+- Macro Stop, Timeline Run, and Timeline Edit: buttons show the macro, target, and command. The timeline progress bar appears only on Run buttons aimed at the master timeline, the only timeline that reports progress.
+- All of these actions accept a text label override, and their presets use the new label feedbacks: "PBUS register/trigger or label override", "Image Store input source name or label override", "Button mapping bus/shift/button/source or label override", and "Macro Stop / Timeline Run / Timeline Edit label or label override".
+- Existing buttons: buttons made from older presets keep their static text until the matching label feedback is added (re-dropping the preset also works). Companion 5 upgrades actions and feedbacks in separate passes, so an upgrade script cannot tell which buttons to change. Upgrade script index 4 is intentionally empty for that reason.
 
 ## 2026.0.9.3 fixes
 

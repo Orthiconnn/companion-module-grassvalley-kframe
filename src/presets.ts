@@ -30,6 +30,13 @@ export function UpdatePresets(self: ModuleInstance): void {
 		options: { automaticLabel: true },
 	})
 	const gpiFeedback = () => ({ feedbackId: 'gpi_button_state' as const, options: {} })
+	const imageInputFeedback = () => ({
+		feedbackId: 'image_store_input_state' as const,
+		options: { automaticLabel: true },
+	})
+	const actionLabelFeedback = () => ({ feedbackId: 'action_label' as const, options: { automaticLabel: true } })
+	const mappingFeedback = () => ({ feedbackId: 'button_mapping_state' as const, options: { automaticLabel: true } })
+	const pbusFeedback = () => ({ feedbackId: 'pbus_button_state' as const, options: { automaticLabel: true } })
 	const transitionFeedback = () => ({ feedbackId: 'transition_button_state' as const, options: {} })
 	const ememFeedback = () => ({ feedbackId: 'emem_button_state' as const, options: {} })
 	const source1Label = self.sourceDisplayName(1)
@@ -220,7 +227,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 			name: 'Stop Macro 1',
 			style: { text: 'STOP\nMACRO 1', size: 10, color: 0xffffff, bgcolor: 0x8b0000, ...suiteBadgeStyle },
 			steps: [{ down: [{ actionId: 'macro_stop', options: { suite: 'suite1a', value: 1 } }], up: [] }],
-			feedbacks: [suiteBadgeFeedback()],
+			feedbacks: [suiteBadgeFeedback(), actionLabelFeedback()],
 		},
 		stopall: {
 			type: 'simple',
@@ -267,7 +274,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 			name: 'Image Store Input 1',
 			style: { text: 'IMAGE IN\n1', size: 10, color: 0xffffff, bgcolor: 0x6a4c93, ...suiteBadgeStyle },
 			steps: [{ down: [{ actionId: 'image_store_input', options: { suite: 'suite1a', value: 1 } }], up: [] }],
-			feedbacks: [suiteBadgeFeedback()],
+			feedbacks: [imageInputFeedback()],
 		},
 		gpi1: {
 			type: 'simple',
@@ -281,14 +288,14 @@ export function UpdatePresets(self: ModuleInstance): void {
 			name: 'PBUS 1 Recall 0',
 			style: { text: 'PBUS 1\nRECALL 0', size: 10, color: 0x000000, bgcolor: 0xffbf00, ...suiteBadgeStyle },
 			steps: [{ down: [{ actionId: 'pbus_recall', options: { suite: 'suite1a', pbus: 1, register: 0 } }], up: [] }],
-			feedbacks: [suiteBadgeFeedback()],
+			feedbacks: [pbusFeedback()],
 		},
 		'pbus-trigger1': {
 			type: 'simple',
-			name: 'PBUS 1 Trigger 0',
-			style: { text: 'PBUS 1\nTRIGGER 0', size: 10, color: 0x000000, bgcolor: 0xffbf00, ...suiteBadgeStyle },
+			name: 'PBUS 1 Trigger 0 (Play)',
+			style: { text: 'PBUS 1\nPLAY', size: 10, color: 0x000000, bgcolor: 0xffbf00, ...suiteBadgeStyle },
 			steps: [{ down: [{ actionId: 'pbus_trigger', options: { suite: 'suite1a', pbus: 1, trigger: 0 } }], up: [] }],
-			feedbacks: [suiteBadgeFeedback()],
+			feedbacks: [pbusFeedback()],
 		},
 	}
 	for (let suite = 2; suite <= 4; suite++) {
@@ -385,16 +392,16 @@ export function UpdatePresets(self: ModuleInstance): void {
 			name: `PBUS ${pbus} Recall 0`,
 			style: { text: `PBUS ${pbus}\nRECALL 0`, size: 10, color: 0x000000, bgcolor: 0xffbf00, ...suiteBadgeStyle },
 			steps: [{ down: [{ actionId: 'pbus_recall', options: { suite: 'suite1a', pbus, register: 0 } }], up: [] }],
-			feedbacks: [suiteBadgeFeedback()],
+			feedbacks: [pbusFeedback()],
 		}
 	}
 	for (let pbus = 2; pbus <= 8; pbus++) {
 		presets[`pbus-trigger${pbus}`] = {
 			type: 'simple',
-			name: `PBUS ${pbus} Trigger 0`,
-			style: { text: `PBUS ${pbus}\nTRIGGER 0`, size: 10, color: 0x000000, bgcolor: 0xffbf00, ...suiteBadgeStyle },
+			name: `PBUS ${pbus} Trigger 0 (Play)`,
+			style: { text: `PBUS ${pbus}\nPLAY`, size: 10, color: 0x000000, bgcolor: 0xffbf00, ...suiteBadgeStyle },
 			steps: [{ down: [{ actionId: 'pbus_trigger', options: { suite: 'suite1a', pbus, trigger: 0 } }], up: [] }],
-			feedbacks: [suiteBadgeFeedback()],
+			feedbacks: [pbusFeedback()],
 		}
 	}
 	for (let output = 2; output <= 10; output++) {
@@ -454,7 +461,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 							up: [],
 						},
 					],
-					feedbacks: [suiteBadgeFeedback()],
+					feedbacks: [mappingFeedback()],
 				}
 			}
 		}
@@ -494,7 +501,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 			name: `Timeline Run ${label}`,
 			style: { text: `${label}\nRUN`, size: 10, color: 0xffffff, bgcolor: 0x006d77, ...suiteBadgeStyle },
 			steps: [{ down: [{ actionId: 'run', options: { suite: 'suite1a', target } }], up: [] }],
-			feedbacks: target === 'MASTER' ? [timelineProgressFeedback()] : [suiteBadgeFeedback()],
+			feedbacks: [target === 'MASTER' ? timelineProgressFeedback() : suiteBadgeFeedback(), actionLabelFeedback()],
 		}
 	}
 	for (const [presetId, command, label] of timelineEditPresets) {
@@ -505,7 +512,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 			steps: [
 				{ down: [{ actionId: 'timeline_edit', options: { suite: 'suite1a', target: 'MASTER', command } }], up: [] },
 			],
-			feedbacks: [suiteBadgeFeedback()],
+			feedbacks: [suiteBadgeFeedback(), actionLabelFeedback()],
 		}
 	}
 	const referencedPresets = new Set<string>()

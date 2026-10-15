@@ -1,6 +1,6 @@
 {
 	"name": "companion-module-grassvalley-kayenne",
-	"version": "2026.0.9-beta.3",
+	"version": "2026.0.9-beta.4",
 	"main": "dist/main.js",
 	"type": "module",
 	"scripts": {
@@ -9,7 +9,7 @@
 		"package": "npm run build && companion-module-build --prerelease",
 		"build": "rimraf dist && npm run build:main",
 		"build:main": "tsc -p tsconfig.build.json",
-		"test": "npm run build && node test/test-builders.cjs && node test/test-legacy-actions.mjs && node test/test-upgrades.mjs && node test/test-config.mjs && node --test test/repro-connection-lifecycle.cjs test/repro-keyer-tally.mjs test/repro-keyer-active-tally.mjs test/repro-multi-action-feedback.mjs test/repro-macro-dropdown.mjs test/repro-review-2026-0-9-2.mjs test/repro-command-safety.cjs test/repro-protocol-round3.cjs test/repro-module-round3.mjs",
+		"test": "npm run build && node test/test-builders.cjs && node test/test-legacy-actions.mjs && node test/test-upgrades.mjs && node test/test-config.mjs && node --test test/repro-connection-lifecycle.cjs test/repro-keyer-tally.mjs test/repro-keyer-active-tally.mjs test/repro-multi-action-feedback.mjs test/repro-macro-dropdown.mjs test/repro-review-2026-0-9-2.mjs test/repro-command-safety.cjs test/repro-protocol-round3.cjs test/repro-module-round3.mjs test/repro-auto-labels.mjs",
 		"dev": "tsc -p tsconfig.build.json --watch",
 		"lint:raw": "eslint",
 		"lint": "npm run lint:raw -- ."
