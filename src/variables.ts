@@ -1,6 +1,6 @@
 import type ModuleInstance from './main.js'
 
-export type VariablesSchema = Record<string, string>
+export type VariablesSchema = Record<string, string | number>
 
 export function UpdateVariableDefinitions(self: ModuleInstance): void {
 	self.setVariableDefinitions(
@@ -12,7 +12,14 @@ export function UpdateVariableDefinitions(self: ModuleInstance): void {
 					[`suite${suite}_protocol`, { name: `Suite ${suite} active protocol` }],
 					[`suite${suite}_frame_version`, { name: `Suite ${suite} frame version` }],
 				]
-			}).flat(),
+			})
+				.flat()
+				.concat([
+					// Published by grassvalley-kframe 1.0.0; upgraded buttons and expressions read them.
+					['last_macro', { name: 'Last macro sent' }],
+					['last_aux', { name: 'Last AUX routed' }],
+					['last_aux_source', { name: 'Last AUX source' }],
+				]),
 		),
 	)
 }

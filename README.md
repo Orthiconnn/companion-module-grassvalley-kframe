@@ -79,6 +79,16 @@ Every button whose action has a setting now shows that setting and updates when 
 - All of these actions accept a text label override, and their presets use the new label feedbacks: "PBUS register/trigger or label override", "Image Store input source name or label override", "Button mapping bus/shift/button/source or label override", and "Macro Stop / Timeline Run / Timeline Edit label or label override".
 - Existing buttons: buttons made from older presets keep their static text until the matching label feedback is added (re-dropping the preset also works). Companion 5 upgrades actions and feedbacks in separate passes, so an upgrade script cannot tell which buttons to change. Upgrade script index 4 is intentionally empty for that reason.
 
+### Upgrade from grassvalley-kframe 1.0.0 and full button test
+
+A `grassvalley-kframe` 1.0.0 connection (the latest release on GitHub) with every one of its presets plus variations (variable sources, `$(kframe:…)` expressions, range limits, "any" tallies, and invalid numbers) was tested on the V14.7.1 simulator, then switched to this module with Companion's "upgrade to another module" and pressed again. Configuration, actions, and feedbacks converted; the same buttons ran the same macros and AUX routes. Only the deliberately invalid Macro 0 and AUX 97 buttons fail, as they did before. Upgraded buttons keep their own text and colours; the old "sent" flash is not carried over.
+
+All 191 presets and 431 option variations (every crosspoint, E-MEM, transition, Run, and Timeline Edit target; PBUS 1, 2, and 24 with all 16 triggers; range limits; Suites 2–4; 50% and 200% text; suite dot off; label override) were then pressed on Suites 1–4 of the V14.7.1 simulator (UDP) and the V18.1.0 simulator (TCP): 649 presses on each, with no errors other than the invalid-input test buttons.
+
+- Legacy variables: `last_macro`, `last_aux`, and `last_aux_source` are defined again and update when a macro or AUX route is sent. Upgraded buttons and expressions that read them failed or showed blanks before.
+- Connect buttons: Connect and Connect/Disconnect start the connection and return at once. Companion fails an action call after about 5 seconds, so a slower handshake used to log "Call timed out" even though the suite connected.
+- The frame accepts one connection handshake at a time per client IP. Other clients on the same computer that are reconnecting (another Companion connection or a panel bridge) can make a handshake time out; the next retry connects.
+
 ## 2026.0.9.3 fixes
 
 Reliability and correctness fixes from a full code review. Each item has a regression test in `npm test`, and the new tests fail against 2026.0.9.2. Tests use synthetic packets and loopback sockets; these fixes have not yet been validated on a live frame.

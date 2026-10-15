@@ -132,6 +132,11 @@ export function UpdateActions(self: ModuleInstance): void {
 		default: true,
 	}
 	const id = (e: { options: { suite?: string } }) => self.connectionId(suiteId(e.options.suite))
+	// Companion fails an action call after a few seconds, but a handshake can take
+	// up to 20 s. Start the connection and report its failure in the log instead.
+	const connectInBackground = (suite: unknown): void => {
+		self.connectSuite(suite).catch((error: unknown) => self.log('warn', `Connect failed: ${String(error)}`))
+	}
 	const suiteSubscription: {
 		optionsToMonitorForSubscribe: ('suite' | 'textSize' | 'showSuite')[]
 		subscribe: (action: { id: string; controlId: string; options: SuiteOption }) => void
@@ -147,9 +152,7 @@ export function UpdateActions(self: ModuleInstance): void {
 			name: 'Connection: Connect',
 			...suiteSubscription,
 			options: [suiteOption, textSizeOption, showSuiteOption],
-			callback: async (e) => {
-				await self.connectSuite(e.options.suite)
-			},
+			callback: (e) => connectInBackground(e.options.suite),
 		},
 		disconnect: {
 			name: 'Connection: Disconnect',
@@ -165,7 +168,7 @@ export function UpdateActions(self: ModuleInstance): void {
 				const suite = suiteId(e.options.suite),
 					status = self.suiteStates[suite].status
 				if (status === 'connected' || status === 'connecting') await self.disconnectSuite(suite)
-				else await self.connectSuite(suite)
+				else connectInBackground(suite)
 			},
 		},
 		macro_play: {
@@ -189,7 +192,11 @@ export function UpdateActions(self: ModuleInstance): void {
 			optionsToMonitorForSubscribe: ['suite', 'value', 'labelOverride', 'textSize', 'showSuite'],
 			subscribe: (action) => self.trackButton(self.macroButtons, action, { macro: optionNumber(action.options.value) }),
 			unsubscribe: (action) => self.untrackButton(self.macroButtons, action),
-			callback: (e) => resultOrThrow(p.sendMacro(id(e), Number(e.options.value))),
+			callback: (e) => {
+				const macro = Number(e.options.value)
+				resultOrThrow(p.sendMacro(id(e), macro))
+				self.setVariableValues({ last_macro: macro })
+			},
 		},
 		macro_stop: {
 			name: 'Macro: Stop',
@@ -258,10 +265,12 @@ export function UpdateActions(self: ModuleInstance): void {
 				textSizeOption,
 				showSuiteOption,
 			],
-			callback: (e) =>
-				resultOrThrow(
-					p.sendAuxRoute(id(e), Number(e.options.aux), Number(e.options.source), String(e.options.transition)),
-				),
+			callback: (e) => {
+				const aux = Number(e.options.aux),
+					source = Number(e.options.source)
+				resultOrThrow(p.sendAuxRoute(id(e), aux, source, String(e.options.transition)))
+				self.setVariableValues({ last_aux: aux, last_aux_source: source })
+			},
 		},
 		crosspoint: {
 			name: 'Crosspoint: Route Source',
