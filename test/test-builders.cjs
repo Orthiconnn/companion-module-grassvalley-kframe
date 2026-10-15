@@ -250,7 +250,11 @@ imageStoreIssue.writeUInt16BE(4, 16)
 imageStoreIssue.writeUInt16BE(3, 18)
 imageStoreIssue.writeUInt32BE(1500, 20)
 h.imageStoreSubscriptionIds.set(imageStoreSubId, 3)
-assertValue('image-store display-image response parsed', h.parseImageStoreParameterResponse(imageStoreIssue, 0, 24), true)
+assertValue(
+	'image-store display-image response parsed',
+	h.parseImageStoreParameterResponse(imageStoreIssue, 0, 24),
+	true,
+)
 assertValue('image-store output state', h.getImageStoreImage(3), 1500)
 
 const transitionDid = 0x03000000
