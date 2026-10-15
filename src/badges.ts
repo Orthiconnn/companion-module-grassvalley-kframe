@@ -10,16 +10,44 @@ const SUITE_NUMBER_PATHS: Record<number, string> = {
 // on the macro button's lower-left reference position.
 const LABELED_BADGE_X = -7
 
-const badgeSvg = (suite: number): string => `
-<svg xmlns="http://www.w3.org/2000/svg" width="360" height="360" viewBox="0 0 360 360">
-	<g transform="translate(24 -24)">
+const suiteBadgeGroup = (suite: number, x: number): string => `<g transform="translate(${x} -24)">
 		<circle cx="38" cy="322" r="31" fill="#050505" stroke="#00cfd5" stroke-width="6"/>
 		<path d="${SUITE_NUMBER_PATHS[suite]}" fill="none" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
-	</g>
+	</g>`
+
+const badgeSvg = (suite: number): string => `
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="360" viewBox="0 0 360 360">
+	${suiteBadgeGroup(suite, 24)}
 </svg>`
 
+// XML 1.0 forbids most C0 controls and U+FFFE/U+FFFF; labels can carry them
+// from variables or frame-supplied source names.
+// eslint-disable-next-line no-control-regex
+const XML_INVALID = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g
+
 const escapeXml = (value: string): string =>
-	value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
+	value
+		.replace(XML_INVALID, '')
+		.replaceAll('&', '&amp;')
+		.replaceAll('<', '&lt;')
+		.replaceAll('>', '&gt;')
+		.replaceAll('"', '&quot;')
+
+// Approximate Arial advance width per character, as a fraction of font size.
+const CHAR_WIDTH = 0.6
+const MAX_TEXT_WIDTH = 300
+
+// Scale text up only as far as it still fits the button; never shrink a
+// requested size below the unscaled base. Anything still too wide is compressed.
+function fittedText(base: number, scale: number, text: string): { size: number; widthLimit: string } {
+	const length = Math.max([...text].length, 1)
+	const scaled = base * scale
+	const fit = MAX_TEXT_WIDTH / (length * CHAR_WIDTH)
+	const size = Math.round(Math.min(scaled, Math.max(Math.min(base, scaled), fit)))
+	const widthLimit =
+		length * CHAR_WIDTH * size > MAX_TEXT_WIDTH ? ` textLength="${MAX_TEXT_WIDTH}" lengthAdjust="spacingAndGlyphs"` : ''
+	return { size, widthLimit }
+}
 
 /**
  * Draw a button's independently positioned heading and source label together
@@ -38,26 +66,20 @@ export const labeledButtonSvg = (
 ): string => {
 	const textColor = `#${color.toString(16).padStart(6, '0')}`
 	const scale = Math.max(0.5, Math.min(2, textScale))
-	const headingSize = Math.round(58 * scale)
-	const sourceSize = Math.round(Math.max(26, Math.min(60, Math.floor(580 / Math.max(source.length, 1)))) * scale)
-	const sourceWidthLimit = source.length > 20 ? ' textLength="300" lengthAdjust="spacingAndGlyphs"' : ''
+	const headingText = fittedText(58, scale, heading)
+	const sourceText = fittedText(Math.max(26, Math.min(60, Math.floor(580 / Math.max(source.length, 1)))), scale, source)
 	const transitionProgress = Math.max(0, Math.min(1, transition?.ramp ?? 0))
 	const transitionHeight = transitionProgress * 280
 	const transitionStrip = transition?.active
 		? `<rect x="325" y="${(316 - transitionHeight).toFixed(2)}" width="30" height="${transitionHeight.toFixed(2)}" rx="3" fill="#98e700" stroke="#315f00" stroke-width="5"/>`
 		: ''
-	const suiteBadge = showSuite
-		? `<g transform="translate(${LABELED_BADGE_X} -24)">
-		<circle cx="38" cy="322" r="31" fill="#050505" stroke="#00cfd5" stroke-width="6"/>
-		<path d="${SUITE_NUMBER_PATHS[suite]}" fill="none" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
-	</g>`
-		: ''
+	const suiteBadge = showSuite ? suiteBadgeGroup(suite, LABELED_BADGE_X) : ''
 	return Buffer.from(
 		`
 <svg xmlns="http://www.w3.org/2000/svg" width="360" height="360" viewBox="0 0 360 360">
 	<g fill="${textColor}" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="500">
-		<text x="180" y="54" font-size="${headingSize}" dominant-baseline="middle">${escapeXml(heading)}</text>
-		<text x="180" y="190" font-size="${sourceSize}" dominant-baseline="middle"${sourceWidthLimit}>${escapeXml(source)}</text>
+		<text x="180" y="54" font-size="${headingText.size}" dominant-baseline="middle"${headingText.widthLimit}>${escapeXml(heading)}</text>
+		<text x="180" y="190" font-size="${sourceText.size}" dominant-baseline="middle"${sourceText.widthLimit}>${escapeXml(source)}</text>
 	</g>
 	${transitionStrip}
 	${suiteBadge}
@@ -100,12 +122,7 @@ export const timelineProgressSvg = (
 		.join('')
 	const dotFill = paused ? '#ff8c00' : '#98e700'
 	const dotStroke = paused ? '#b84a00' : '#4c7300'
-	const suiteBadge = showSuite
-		? `<g transform="translate(${LABELED_BADGE_X} -24)">
-		<circle cx="38" cy="322" r="31" fill="#050505" stroke="#00cfd5" stroke-width="6"/>
-		<path d="${SUITE_NUMBER_PATHS[suite]}" fill="none" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
-	</g>`
-		: ''
+	const suiteBadge = showSuite ? suiteBadgeGroup(suite, LABELED_BADGE_X) : ''
 	return Buffer.from(
 		`
 <svg xmlns="http://www.w3.org/2000/svg" width="360" height="360" viewBox="0 0 360 360">

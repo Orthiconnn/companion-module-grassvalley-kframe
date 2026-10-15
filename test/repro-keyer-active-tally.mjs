@@ -35,7 +35,6 @@ for (const [me, index] of Object.entries({ ME1: 0, ME2: 1, ME3: 2, PGM: 3, ME4: 
 			h.emitter.on('meStateChanged', (event) => events.push(event))
 			const self = {
 				connectionId: (suite) => suite,
-				showSuiteDot: () => true,
 				setFeedbackDefinitions: (value) => {
 					definitions = value
 				},

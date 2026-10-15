@@ -44,7 +44,7 @@ for (const [type, [map, options]] of Object.entries(types)) {
 			const remaining = remove === 'first' ? second : first
 			assert.equal(module[map].get('button')?.labelOverride, remaining.options.labelOverride)
 			assert.equal(module[map].get('button')?.suite, remaining.options.suite)
-			assert.equal(module.showSuiteDot('button', type), remaining.options.showSuite)
+			assert.equal(module[map].get('button')?.showSuite !== false, remaining.options.showSuite)
 			assert.equal(module.suiteButtons.get('button')?.size, 1)
 			actions[type].unsubscribe(remaining)
 			assert.equal(module[map].has('button'), false)
@@ -78,7 +78,7 @@ test('Updating or subscribing an action twice does not leave stale assignments',
 	assert.equal(module.suiteButtons.get('button').size, 2)
 	actions.macro_play.unsubscribe(second)
 	assert.equal(module.macroButtons.get('button').labelOverride, 'Updated')
-	assert.equal(module.showSuiteDot('button', 'macro_play'), false)
+	assert.equal(module.macroButtons.get('button')?.showSuite !== false, false)
 	actions.macro_play.unsubscribe(first)
 	assert.equal(module.macroButtons.has('button'), false)
 	assert.equal(module.suiteButtons.has('button'), false)

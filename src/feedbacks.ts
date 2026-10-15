@@ -41,7 +41,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 			callback: (feedback) => {
 				const id = suiteId(feedback.options.suite),
 					state = self.suiteStates[id]
-				const actionTextSize = [...(self.suiteButtons.get(feedback.controlId)?.values() ?? [])][0]?.textSize ?? 1
+				const actionTextSize = self.primarySuiteButton(feedback.controlId)?.textSize ?? 1
 				const [mainPort] = suitePorts(id),
 					heartbeat = state.heartbeatFlash ? '●' : '○'
 				if (state.status === 'connected') {
@@ -225,9 +225,9 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 								color,
 								undefined,
 								assignment.textSize,
-								self.showSuiteDot(feedback.controlId, 'crosspoint'),
+								assignment.showSuite,
 							)
-						: self.showSuiteDot(feedback.controlId, 'crosspoint')
+						: assignment.showSuite
 							? SUITE_BADGES[suiteNumber(assignment.suite)]
 							: CLEAR_BADGE,
 					pngalignment: feedback.options.automaticLabel ? 'center:bottom' : 'left:bottom',
@@ -260,9 +260,9 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 								0xffffff,
 								undefined,
 								assignment.textSize,
-								self.showSuiteDot(feedback.controlId, 'image_store'),
+								assignment.showSuite,
 							)
-						: self.showSuiteDot(feedback.controlId, 'image_store')
+						: assignment.showSuite
 							? SUITE_BADGES[suiteNumber(assignment.suite)]
 							: CLEAR_BADGE,
 					pngalignment: feedback.options.automaticLabel ? 'center:bottom' : 'left:bottom',
@@ -289,9 +289,9 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 								0xffffff,
 								undefined,
 								assignment.textSize,
-								self.showSuiteDot(feedback.controlId, 'panel_memory'),
+								assignment.showSuite,
 							)
-						: self.showSuiteDot(feedback.controlId, 'panel_memory')
+						: assignment.showSuite
 							? SUITE_BADGES[suiteNumber(assignment.suite)]
 							: CLEAR_BADGE,
 					pngalignment: feedback.options.automaticLabel ? 'center:bottom' : 'left:bottom',
@@ -307,9 +307,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				if (!assignment) return {}
 				return {
 					text: assignment.labelOverride || `GPI\n${assignment.gpi}`,
-					png64: self.showSuiteDot(feedback.controlId, 'gpi')
-						? SUITE_BADGES[suiteNumber(assignment.suite)]
-						: CLEAR_BADGE,
+					png64: assignment.showSuite ? SUITE_BADGES[suiteNumber(assignment.suite)] : CLEAR_BADGE,
 					pngalignment: 'left:bottom',
 					size: Math.round(10 * assignment.textSize),
 				}
@@ -345,8 +343,17 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					secondaryDid < 0
 						? null
 						: self.protocol.getTransitionTelemetry(self.connectionId(assignment.suite), secondaryDid)
+				// Only M/E PRI/SEC telemetry is subscribed; keyer targets have none.
 				const telemetry =
-					partition === 'SEC' ? secondary : partition === 'BOTH' ? (primary?.active ? primary : secondary) : primary
+					partition === 'SEC'
+						? secondary
+						: partition === 'BOTH'
+							? primary?.active
+								? primary
+								: secondary
+							: partition === 'PRI'
+								? primary
+								: undefined
 				return {
 					text: '',
 					png64: labeledButtonSvg(
@@ -358,7 +365,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 							? { ramp: telemetry.ramp, active: telemetry.active }
 							: undefined,
 						assignment.textSize,
-						self.showSuiteDot(feedback.controlId, 'transition'),
+						assignment.showSuite,
 					),
 					pngalignment: 'center:bottom',
 					bgcolor: assignment.transition === 'auto' ? family.bright : family.dark,
@@ -402,11 +409,15 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 						color,
 						undefined,
 						assignment.textSize,
-						self.showSuiteDot(feedback.controlId, 'emem'),
+						assignment.showSuite,
 					),
 					pngalignment: 'center:bottom',
 					color,
-					bgcolor: assignment.target === 'MASTER' ? 0xffffff : secondary ? background?.dark : background?.bright,
+					...(assignment.target === 'MASTER'
+						? { bgcolor: 0xffffff }
+						: background
+							? { bgcolor: secondary ? background.dark : background.bright }
+							: {}),
 				}
 			},
 		},
@@ -415,9 +426,12 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 			type: 'advanced',
 			options: [suiteOption],
 			callback: (feedback) => {
-				const suite = suiteId(feedback.options.suite)
-				const actionTextSize = [...(self.suiteButtons.get(feedback.controlId)?.values() ?? [])][0]?.textSize ?? 1
-				const showSuite = [...(self.suiteButtons.get(feedback.controlId)?.values() ?? [])][0]?.showSuite !== false
+				// Follow the button's action like every other button-state feedback;
+				// the option is only a fallback for buttons without a tracked action.
+				const tracked = self.primarySuiteButton(feedback.controlId)
+				const suite = tracked?.suite ?? suiteId(feedback.options.suite)
+				const actionTextSize = tracked?.textSize ?? 1
+				const showSuite = tracked?.showSuite !== false
 				const state = self.protocol.getTimelineState(self.connectionId(suite))
 				if (
 					state?.duration === null ||
@@ -457,7 +471,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				const suites = new Set(assignments.map((assignment) => assignment.suite))
 				if (suites.size !== 1) return { png64: CLEAR_BADGE }
 				const [suite] = suites
-				const size = assignments[0]?.textSize ?? 1
+				const size = self.primarySuiteButton(feedback.controlId)?.textSize ?? assignments[0]?.textSize ?? 1
 				return { png64: SUITE_BADGES[suiteNumber(suite)], pngalignment: 'left:bottom', size: Math.round(10 * size) }
 			},
 		},

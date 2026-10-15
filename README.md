@@ -1,11 +1,11 @@
-# Grass Valley Kayenne Companion v2026.0.9.2
+# Grass Valley Kayenne Companion v2026.0.9.3
 
 Major-version Bitfocus Companion implementation based on the Grass Valley Stream Deck application.
 
 ## Versioning
 
-- Internal project version: `2026.0.9.2`
-- Companion prerelease package version: `2026.0.9-beta.2` (SemVer)
+- Internal project version: `2026.0.9.3`
+- Companion prerelease package version: `2026.0.9-beta.3` (SemVer)
 
 ## Source baseline
 
@@ -54,7 +54,7 @@ Validation on 2026-10-14: V14.7.1 UDP and V18.1.0 TCP each returned all 30 keyer
 
 ## Buttons with multiple actions
 
-Action subscriptions are tracked by control ID and action-instance ID. Removing one Macro, AUX, Crosspoint, E-MEM, Transition, Panel Memory, Image Store, or GPI action preserves the remaining assignments and their feedback settings. Each feedback type displays its most recently subscribed remaining action, matching the prior selection behavior while allowing removal to restore an earlier assignment. The generic suite badge considers every action instance and clears when visible assignments span multiple suites.
+Action subscriptions are tracked by control ID and action-instance ID. Removing one Macro, AUX, Crosspoint, E-MEM, Transition, Panel Memory, Image Store, or GPI action preserves the remaining assignments and their feedback settings. When a button holds several actions of one type, its feedback displays the action with the lowest action-instance ID, so the result does not depend on the order Companion subscribes actions after a restart or edit. Removing one restores the next remaining assignment. The generic suite badge considers every action instance and clears when visible assignments span multiple suites.
 
 The 2026-10-14 reproduction failed all 17 original cases before the fix. Those cases and three additional checks for resubscription, button isolation, and mixed suites now pass in `test/repro-multi-action-feedback.mjs`, included in `npm test`. No frame commands are needed for these tests.
 
@@ -67,6 +67,17 @@ Manual and frame-initiated disconnects also refresh dropdowns and presets after 
 Disconnect cleanup also clears cached source names before announcing disconnection. AUX and crosspoint dropdowns then use remaining suites' source names or numbered fallback labels. The same four regression cases verify both source dropdowns and the cleared source-name getters.
 
 Validation on 2026-10-14: synthetic UDP and TCP packets reproduce the original stale-dropdown failure and pass after the fix. Tests cover dropdowns, presets, cleared names, unchanged batches, and disconnect cleanup in `test/repro-macro-dropdown.mjs`, included in `npm test`. Live frame names were not changed for this test.
+
+## 2026.0.9.3 fixes
+
+Reliability and correctness fixes from a full code review. Each item has a regression test in `npm test`, and the new tests fail against 2026.0.9.2. Tests use synthetic packets and loopback sockets; these fixes have not yet been validated on a live frame.
+
+- Connection lifecycle: only transport failures (TCP, main/listener socket, Packet 1) are fatal; failed command sends and aux-state persistence report a non-fatal warning and keep the link up. Startup no longer reports an error when aux-state persistence is not configured. The retry loop stops immediately when no target IP is set. `destroy()` during a configuration change no longer reconnects. Concurrent connects for one suite are serialised so no orphaned connection survives. The connect wait follows status events instead of polling.
+- Crash safety: UDP sends after disconnect (timeline subscription, second suite-select packet, or any closed socket) are skipped or reported instead of throwing an uncaught socket error.
+- Commands: Stop-All discards queued macro commands so none start afterward. Numeric command inputs and target DIDs must be whole numbers in range; NaN, fractions, and text are rejected before sending.
+- Frame parsing: short AUX/ME responses no longer read into the next packed response. TCP framing discards headerless data and resyncs past a stray header instead of stalling.
+- Status and feedback: "Target IP is required" clears once an IP is set. Unexpected disconnects clear protocol, frame-version, and heartbeat state. Keyer Auto transition buttons no longer show the M/E primary progress strip. eDPM E-MEM buttons keep the user's background. Timeline progress follows its action's suite. Labels with XML-invalid control characters render, and 200% text fits the button width.
+- Upgrades: scripts are append-only. A catch-up script fills missing suite selections, retries, text size, and suite-badge options for `grassvalley-kframe` 0.9.1 and earlier Kayenne installs without changing existing values. Blank, null, or non-numeric retry settings migrate to the default of 5.
 
 ## Development baseline
 

@@ -25,7 +25,6 @@ test('Selecting ME1 Key 1 must preserve ME1 A source and tally', (t) => {
 		connectionId: (suite) => suite,
 		sourceChoices: () => [],
 		macroChoices: () => [],
-		showSuiteDot: () => true,
 		setActionDefinitions: (definitions) => {
 			actions = definitions
 		},

@@ -6,6 +6,7 @@ const HandshakeConnection = require('./handshake-connection-class.cjs');
 class ConnectionManager {
     constructor() {
         this.connections = new Map(); // connectionId -> HandshakeConnection
+        this.pendingCreates = new Map(); // connectionId -> gate for the latest create
         this.emitter = new EventEmitter();
         this.sdkGlobalSettings = null;
     }
@@ -23,10 +24,38 @@ class ConnectionManager {
      * @returns {Promise<function>} Cleanup function
      */
     async createConnection(connectionId, targetHost, suite, customPorts, suiteName, pluginVersion, buildDate) {
-        // Close existing connection if it exists
-        if (this.connections.has(connectionId)) {
-            await this.disconnectConnection(connectionId);
+        // Serialise replace-and-register per id so a concurrent create cannot be
+        // overwritten (and orphaned) while an older one awaits its disconnect.
+        const previous = this.pendingCreates.get(connectionId) ?? Promise.resolve();
+        let release;
+        const gate = new Promise((resolve) => { release = resolve; });
+        this.pendingCreates.set(connectionId, gate);
+        let connection;
+        try {
+            await previous;
+            // Close existing connection if it exists
+            if (this.connections.has(connectionId)) {
+                await this.disconnectConnection(connectionId);
+            }
+            connection = this.registerConnection(connectionId, targetHost, suite, customPorts, suiteName, pluginVersion, buildDate);
+        } finally {
+            if (this.pendingCreates.get(connectionId) === gate) this.pendingCreates.delete(connectionId);
+            release();
         }
+
+        try {
+            // Start the connection
+            const cleanup = await connection.start();
+            return cleanup;
+        } catch (error) {
+            connection.cleanup();
+            // An older cancelled attempt must not delete a replacement connection.
+            if (this.connections.get(connectionId) === connection) this.connections.delete(connectionId);
+            throw error;
+        }
+    }
+
+    registerConnection(connectionId, targetHost, suite, customPorts, suiteName, pluginVersion, buildDate) {
         
         // Create new connection instance
         const connection = new HandshakeConnection(
@@ -76,17 +105,7 @@ class ConnectionManager {
         
         // Store connection
         this.connections.set(connectionId, connection);
-        
-        try {
-            // Start the connection
-            const cleanup = await connection.start();
-            return cleanup;
-        } catch (error) {
-            connection.cleanup();
-            // An older cancelled attempt must not delete a replacement connection.
-            if (this.connections.get(connectionId) === connection) this.connections.delete(connectionId);
-            throw error;
-        }
+        return connection;
     }
     
     /**

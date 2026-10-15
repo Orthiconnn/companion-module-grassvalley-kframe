@@ -48,18 +48,26 @@ export type ModuleSchema = {
 
 export { UpgradeScripts }
 
-// Feedback displays the most recently subscribed action of each type. Keep all
-// action instances so removing one restores the remaining assignment instead of
-// clearing the whole button. Companion action IDs are unique within a control.
+// The action with the lowest ID wins, so a button shows the same assignment
+// regardless of Companion's subscription order. Companion action IDs are
+// persistent and unique within a control.
+export function primaryAction<T>(actions: Map<string, T> | undefined): T | undefined {
+	if (!actions || actions.size === 0) return undefined
+	let winner: string | undefined
+	for (const actionId of actions.keys()) if (winner === undefined || actionId < winner) winner = actionId
+	return actions.get(winner as string)
+}
+
+// Keep all action instances so removing one restores the remaining assignment
+// instead of clearing the whole button.
 class ButtonAssignments<T> extends Map<string, T> {
 	private readonly assignments = new Map<string, Map<string, T>>()
 
 	setAction(controlId: string, actionId: string, value: T): void {
 		const actions = this.assignments.get(controlId) ?? new Map<string, T>()
-		actions.delete(actionId)
 		actions.set(actionId, value)
 		this.assignments.set(controlId, actions)
-		this.set(controlId, value)
+		this.set(controlId, primaryAction(actions) as T)
 	}
 
 	deleteAction(controlId: string, actionId: string): void {
@@ -69,7 +77,7 @@ class ButtonAssignments<T> extends Map<string, T> {
 			this.assignments.delete(controlId)
 			this.delete(controlId)
 		} else {
-			this.set(controlId, [...actions.values()][actions.size - 1])
+			this.set(controlId, primaryAction(actions) as T)
 		}
 	}
 }
@@ -152,6 +160,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	private readonly manuallyDisconnectedSuites = new Set<SuiteId>()
 	private readonly automaticConnectInProgress = new Set<SuiteId>()
 	private readonly automaticConnectQueued = new Set<SuiteId>()
+	private readonly suiteStatusWaiters = new Set<() => void>()
 	private connectionConfigGeneration = 0
 	private shuttingDown = false
 	private readonly frameMacroStates = new Map<string, Map<number, number>>()
@@ -199,11 +208,11 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.shuttingDown = true
 		this.connectionConfigGeneration++
 		this.manuallyDisconnectedSuites.clear()
+		for (const state of Object.values(this.suiteStates)) if (state.timer) clearTimeout(state.timer)
 		for (const id of SUITES)
 			this.suiteStates[id] = { status: 'disconnected', frameVersion: '', protocolName: '', heartbeatFlash: false }
 		this.checkFeedbacks('connection_state')
 		this.updateRuntimeState()
-		for (const state of Object.values(this.suiteStates)) if (state.timer) clearTimeout(state.timer)
 		if (this.sourceRefreshTimer) clearTimeout(this.sourceRefreshTimer)
 		if (this.macroCatalogRefreshTimer) clearTimeout(this.macroCatalogRefreshTimer)
 		if (this.macroFlashTimer) clearInterval(this.macroFlashTimer)
@@ -222,7 +231,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 
 	async configUpdated(config: ModuleConfig): Promise<void> {
 		this.shuttingDown = true
-		this.connectionConfigGeneration++
+		const generation = ++this.connectionConfigGeneration
 		this.config = config
 		this.manuallyDisconnectedSuites.clear()
 		if (this.sourceRefreshTimer) {
@@ -242,8 +251,12 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			this.transitionRefreshTimer = undefined
 		}
 		await Promise.all(SUITES.map(async (id) => protocol.disconnectConnection(this.connectionId(id))))
-		for (const id of SUITES)
+		// destroy() or a newer configUpdated() ran during the await and owns state now.
+		if (generation !== this.connectionConfigGeneration) return
+		for (const id of SUITES) {
+			if (this.suiteStates[id].timer) clearTimeout(this.suiteStates[id].timer)
 			this.suiteStates[id] = { status: 'disconnected', frameVersion: '', protocolName: '', heartbeatFlash: false }
+		}
 		this.shuttingDown = false
 		this.updateActions()
 		this.updatePresets()
@@ -461,10 +474,20 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		} else if (type === 'FRAME_VERSION' && message && typeof message === 'object' && 'version' in message) {
 			state.frameVersion = String(message.version)
 			this.frameLog(connectionId, `Frame version ${state.frameVersion}`)
+		} else if (type === 'WARNING') {
+			// Non-fatal: a failed send or persistence error leaves the link up.
+			this.log('warn', `Suite ${suiteNumber(id)}: ${String(message)}`)
 		} else if (type === 'SUB_PARSE_ERROR') {
 			this.log('warn', `FRAME Suite ${suiteNumber(id)}: subscription parse error: ${String(message)}`)
 		} else if (['ERROR', 'DISCONNECTED', 'HANDSHAKE_TIMEOUT_ERROR', 'HEARTBEAT_TIMEOUT'].includes(type)) {
 			state.status = 'disconnected'
+			state.connectionPhase = undefined
+			state.frameVersion = ''
+			state.protocolName = ''
+			state.heartbeatFlash = false
+			if (state.timer) clearTimeout(state.timer)
+			state.timer = undefined
+			this.checkFeedbacks('connection_state')
 			// Disconnect can be announced before protocol cleanup clears the catalog.
 			// Reuse the deferred definitions refresh so remaining suites supply labels.
 			if (type === 'DISCONNECTED' && !this.shuttingDown) this.handleSourceNamesUpdated(connectionId)
@@ -491,6 +514,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		const state = this.suiteStates[id]
 		if (!automatic) this.manuallyDisconnectedSuites.delete(id)
 		if (!this.config.host) {
+			this.reportedStatus = InstanceStatus.BadConfig
 			this.updateStatus(InstanceStatus.BadConfig, 'Target IP is required')
 			return false
 		}
@@ -508,7 +532,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 				id,
 				{ mainPort, listenerPort },
 				`Suite ${suiteNumber(id)}`,
-				'2026.0.9.2',
+				'2026.0.9.3',
 				'Oct 14 2026',
 			)
 			if (
@@ -538,14 +562,27 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		}
 	}
 
+	// Resolved from updateRuntimeState(), which runs after every suite status change.
 	private async waitForSuiteConnection(id: SuiteId, timeoutMs: number): Promise<boolean> {
-		const deadline = Date.now() + timeoutMs
-		while (Date.now() < deadline) {
-			if (this.suiteStates[id].status === 'connected') return true
-			if (this.suiteStates[id].status === 'disconnected') return false
-			await new Promise((resolve) => setTimeout(resolve, 100))
+		const settled = (): boolean | undefined => {
+			const status = this.suiteStates[id].status
+			return status === 'connected' ? true : status === 'disconnected' ? false : undefined
 		}
-		return false
+		const initial = settled()
+		if (initial !== undefined) return initial
+		return new Promise((resolve) => {
+			const finish = (connected: boolean): void => {
+				clearTimeout(timer)
+				this.suiteStatusWaiters.delete(check)
+				resolve(connected)
+			}
+			const check = (): void => {
+				const result = settled()
+				if (result !== undefined) finish(result)
+			}
+			const timer = setTimeout(() => finish(false), timeoutMs)
+			this.suiteStatusWaiters.add(check)
+		})
 	}
 
 	async disconnectSuite(value: unknown): Promise<void> {
@@ -604,6 +641,8 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			)
 				return
 			if (await this.connectSuite(id, true, generation)) return
+			// Missing IP is a config error; retrying cannot succeed until configUpdated().
+			if (!this.config.host) return
 			if (attempt < retries) await new Promise((resolve) => setTimeout(resolve, 2000))
 		}
 		this.log('warn', `Suite ${suiteNumber(id)}: maximum reconnection attempts reached`)
@@ -854,18 +893,8 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.checkFeedbacks('suite_badge')
 	}
 
-	showSuiteDot(controlId: string, actionType: string): boolean {
-		const assignments: Record<string, Map<string, { showSuite: boolean }>> = {
-			macro_play: this.macroButtons,
-			aux_route: this.auxButtons,
-			crosspoint: this.crosspointButtons,
-			image_store: this.imageStoreButtons,
-			panel_memory: this.panelMemoryButtons,
-			gpi: this.gpiButtons,
-			transition: this.transitionButtons,
-			emem: this.ememButtons,
-		}
-		return assignments[actionType]?.get(controlId)?.showSuite !== false
+	primarySuiteButton(controlId: string): { suite: SuiteId; textSize: number; showSuite: boolean } | undefined {
+		return primaryAction(this.suiteButtons.get(controlId))
 	}
 
 	untrackSuiteButton(controlId: string, actionId: string): void {
@@ -878,6 +907,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	}
 
 	private updateRuntimeState(): void {
+		for (const check of [...this.suiteStatusWaiters]) check()
 		const statuses = Object.values(this.suiteStates).map((state) => state.status)
 		const status = statuses.includes('connected')
 			? InstanceStatus.Ok

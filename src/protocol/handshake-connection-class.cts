@@ -236,8 +236,9 @@ class HandshakeConnection {
     // Aux state persistence
     async loadAuxState() {
         if (!this.sdkGlobalSettings) {
-            this.emitter.emit('status', 'ERROR', 'Cannot load aux state: SDK settings not initialized.');
+            // Persistence is optional (initialize(null)); nothing to load.
             this.lastPersistedMessageId = null;
+            this.lastUsedSessionId = null;
             return;
         }
         try {
@@ -250,7 +251,7 @@ class HandshakeConnection {
                 this.lastPersistedMessageId = null;
             }
         } catch (error) {
-            this.emitter.emit('status', 'ERROR', `Error loading aux state: ${error.message}`);
+            this.emitter.emit('status', 'WARNING', `Error loading aux state: ${error.message}`);
             this.lastPersistedMessageId = null;
         }
         this.lastUsedSessionId = null;
@@ -268,7 +269,7 @@ class HandshakeConnection {
             };
             await this.sdkGlobalSettings.setGlobalSettings(newGlobalSettings);
         } catch (error) {
-            this.emitter.emit('status', 'ERROR', `Error saving aux state: ${error.message}`);
+            this.emitter.emit('status', 'WARNING', `Error saving aux state: ${error.message}`);
         }
     }
     
@@ -392,19 +393,44 @@ class HandshakeConnection {
         const frames = [];
         while (true) {
             const idx = buffer.indexOf(SESSION_HEADER);
-            if (idx === -1 || buffer.length < idx + 6) break;
-            const length = buffer.readUInt16BE(idx + 4);
-            const frameEnd = idx + 6 + length + 4;
-            if (buffer.length < frameEnd) break;
-            const trailer = buffer.slice(frameEnd - 4, frameEnd);
-            if (!trailer.equals(SESSION_TRAILER)) {
-                buffer = buffer.slice(idx + 4);
+            if (idx === -1) {
+                // No header: keep only a possible partial header at the tail.
+                buffer = buffer.slice(Math.max(0, buffer.length - (SESSION_HEADER.length - 1)));
+                break;
+            }
+            if (idx > 0) buffer = buffer.slice(idx);
+            if (buffer.length < 6) break;
+            const length = buffer.readUInt16BE(4);
+            const frameEnd = 6 + length + 4;
+            if (buffer.length < frameEnd) {
+                // A stray header with a large length must not hold back valid frames
+                // already buffered behind it: resync on the next complete frame.
+                const next = this.tcpNextCompleteFrame(buffer, 1);
+                if (next === -1) break;
+                buffer = buffer.slice(next);
                 continue;
             }
-            frames.push(buffer.slice(idx + 6, frameEnd - 4));
+            const trailer = buffer.slice(frameEnd - 4, frameEnd);
+            if (!trailer.equals(SESSION_TRAILER)) {
+                buffer = buffer.slice(4);
+                continue;
+            }
+            frames.push(buffer.slice(6, frameEnd - 4));
             buffer = buffer.slice(frameEnd);
         }
         return { frames, remaining: buffer };
+    }
+
+    // Offset of the first header at or after `from` that starts a complete frame
+    // with a valid trailer, or -1.
+    tcpNextCompleteFrame(buffer, from) {
+        let idx = buffer.indexOf(SESSION_HEADER, from);
+        while (idx !== -1 && buffer.length >= idx + 6) {
+            const frameEnd = idx + 6 + buffer.readUInt16BE(idx + 4) + 4;
+            if (buffer.length >= frameEnd && buffer.slice(frameEnd - 4, frameEnd).equals(SESSION_TRAILER)) return idx;
+            idx = buffer.indexOf(SESSION_HEADER, idx + 1);
+        }
+        return -1;
     }
 
     // TCP authentication packet
@@ -1656,10 +1682,11 @@ let found = 0;
                 this.tcpSelectSuite();
             } else {
                 const suiteCommandMessages = this.suiteCommands[this.suite];
-                this.mainClient.send(suiteCommandMessages[0], this.secondPhaseDynamicCommPort, this.targetHost, (err) => {
+                this.sendToFrame(suiteCommandMessages[0], (err) => {
                     if (!err && suiteCommandMessages.length > 1) {
                         setTimeout(() => {
-                            this.mainClient.send(suiteCommandMessages[1], this.secondPhaseDynamicCommPort, this.targetHost);
+                            if (this.isClosing) return;
+                            this.sendToFrame(suiteCommandMessages[1]);
                         }, 100);
                     }
                 });
@@ -1813,11 +1840,16 @@ let found = 0;
             const wrapped = this.tcpWrap(rdpPayload);
             this.tcpSocket.write(wrapped, callback);
         } else {
-            if (!this.mainClient || !this.secondPhaseDynamicCommPort || !this.targetHost) {
+            if (this.isClosing || !this.mainClient || !this.secondPhaseDynamicCommPort || !this.targetHost) {
                 if (callback) callback(new Error('UDP socket not available'));
                 return;
             }
-            this.mainClient.send(buffer, this.secondPhaseDynamicCommPort, this.targetHost, callback);
+            // A socket closed outside cleanup() throws synchronously; report it instead.
+            try {
+                this.mainClient.send(buffer, this.secondPhaseDynamicCommPort, this.targetHost, callback);
+            } catch (err) {
+                if (callback) callback(err);
+            }
         }
     }
 
@@ -1828,8 +1860,8 @@ let found = 0;
         }
 
         // Validate macro number (1-999)
-        if (typeof macroNum !== 'number' || macroNum < 1 || macroNum > 999) {
-            return { success: false, message: 'Invalid macro number (must be 1-999).' };
+        if (!Number.isInteger(macroNum) || macroNum < 1 || macroNum > 999) {
+            return { success: false, message: 'Invalid macro number (must be a whole number from 1-999).' };
         }
 
         // Decide Play vs Continue based on live macro status
@@ -1855,8 +1887,8 @@ let found = 0;
         if (this.isClosing || this.mainHandshakeStage !== 9) {
             return { success: false, message: 'Not connected.' };
         }
-        if (typeof macroNum !== 'number' || macroNum < 1 || macroNum > 999) {
-            return { success: false, message: 'Invalid macro number (must be 1-999).' };
+        if (!Number.isInteger(macroNum) || macroNum < 1 || macroNum > 999) {
+            return { success: false, message: 'Invalid macro number (must be a whole number from 1-999).' };
         }
         const macroIdNum = this.generateUniqueId();
         const macroPayload = this.createMacroPayload(macroNum, macroIdNum, 0x0003);
@@ -1869,12 +1901,14 @@ let found = 0;
         if (this.isClosing || this.mainHandshakeStage !== 9) {
             return { success: false, message: 'Not connected.' };
         }
+        // Drop queued Play/Continue/Stop commands so none fire after Stop-All.
+        this.macroQueue.length = 0;
         // Official K-Frame Macro Control Stop-All: normal Stop event with the
         // all-macros sentinel, including macros paused at a User Wait.
         const payload = this.buildSetEvent(0x0003, 0x77000000, Buffer.from([0xff, 0xff, 0xff, 0xff]));
         this.sendToFrame(payload, (err) => {
             if (err) {
-                this.emitter.emit('status', 'ERROR', `Error sending macro stop-all: ${err.message}`);
+                this.emitter.emit('status', 'WARNING', `Error sending macro stop-all: ${err.message}`);
             } else {
                 this.emitter.emit('status', 'MACRO_STOP_ALL_SENT', 'Stop-All sent');
                 this.macroStatus.clear();
@@ -1992,13 +2026,13 @@ let found = 0;
         }
 
         // Validate aux number (1-96)
-        if (typeof auxNum !== 'number' || auxNum < 1 || auxNum > 96) {
-            return { success: false, message: 'Invalid aux number (must be 1-96).' };
+        if (!Number.isInteger(auxNum) || auxNum < 1 || auxNum > 96) {
+            return { success: false, message: 'Invalid aux number (must be a whole number from 1-96).' };
         }
 
         // Validate source number (1-850)
-        if (typeof sourceNum !== 'number' || sourceNum < 1 || sourceNum > 850) {
-            return { success: false, message: 'Invalid source number (must be 1-850).' };
+        if (!Number.isInteger(sourceNum) || sourceNum < 1 || sourceNum > 850) {
+            return { success: false, message: 'Invalid source number (must be a whole number from 1-850).' };
         }
 
         try {
@@ -2017,7 +2051,7 @@ let found = 0;
 
             this.sendToFrame(payload, (err) => {
                 if (err) {
-                    this.emitter.emit('status', 'ERROR', `Error sending aux route: ${err.message}`);
+                    this.emitter.emit('status', 'WARNING', `Error sending aux route: ${err.message}`);
                 } else {
                     const previousSource = this.auxState.get(auxNum) || null;
                     this.auxState.set(auxNum, sourceNum);
@@ -2045,13 +2079,13 @@ let found = 0;
         }
         
         // Validate output number (1-10)
-        if (typeof outputNum !== 'number' || outputNum < 1 || outputNum > 10) {
-            return { success: false, message: 'Invalid output number (must be 1-10).' };
+        if (!Number.isInteger(outputNum) || outputNum < 1 || outputNum > 10) {
+            return { success: false, message: 'Invalid output number (must be a whole number from 1-10).' };
         }
         
         // Validate image number (1-8999)
-        if (typeof imageNum !== 'number' || imageNum < 1 || imageNum > 8999) {
-            return { success: false, message: 'Invalid image number (must be 1-8999).' };
+        if (!Number.isInteger(imageNum) || imageNum < 1 || imageNum > 8999) {
+            return { success: false, message: 'Invalid image number (must be a whole number from 1-8999).' };
         }
         
         try {
@@ -2061,7 +2095,7 @@ let found = 0;
 
             this.sendToFrame(payload, (err) => {
                 if (err) {
-                    this.emitter.emit('status', 'ERROR', `Error sending image store: ${err.message}`);
+                    this.emitter.emit('status', 'WARNING', `Error sending image store: ${err.message}`);
                 } else {
                     this.imageStoreState.set(outputNum, imageNum);
                     this.emitter.emit('imageStoreStateChanged', { origin: 'local', output: outputNum, image: imageNum });
@@ -2080,8 +2114,8 @@ let found = 0;
             return { success: false, message: 'Not connected.' };
         }
 
-        if (typeof inputNum !== 'number' || inputNum < 1 || inputNum > 850) {
-            return { success: false, message: 'Invalid input number (must be 1-850).' };
+        if (!Number.isInteger(inputNum) || inputNum < 1 || inputNum > 850) {
+            return { success: false, message: 'Invalid input number (must be a whole number from 1-850).' };
         }
 
         try {
@@ -2091,7 +2125,7 @@ let found = 0;
 
             this.sendToFrame(payload, (err) => {
                 if (err) {
-                    this.emitter.emit('status', 'ERROR', `Error sending image store input: ${err.message}`);
+                    this.emitter.emit('status', 'WARNING', `Error sending image store input: ${err.message}`);
                 } else {
                     this.emitter.emit('status', 'IMAGE_STORE_INPUT_SENT', `Input -> ${inputNum}`);
                 }
@@ -2108,8 +2142,8 @@ let found = 0;
             return { success: false, message: 'Not connected.' };
         }
 
-        if (typeof eMemNum !== 'number' || eMemNum < 0 || eMemNum > 999) {
-            return { success: false, message: 'Invalid EMEM number (must be 0-999).' };
+        if (!Number.isInteger(eMemNum) || eMemNum < 0 || eMemNum > 999) {
+            return { success: false, message: 'Invalid EMEM number (must be a whole number from 0-999).' };
         }
 
         try {
@@ -2119,7 +2153,7 @@ let found = 0;
 
             this.sendToFrame(payload, (err) => {
                 if (err) {
-                    this.emitter.emit('status', 'ERROR', `Error sending EMEM: ${err.message}`);
+                    this.emitter.emit('status', 'WARNING', `Error sending EMEM: ${err.message}`);
                 } else {
                     this.emitter.emit('status', 'EMEM_SENT', `EMEM ${eMemNum}`);
                 }
@@ -2161,7 +2195,7 @@ let found = 0;
             // Send command
             this.sendToFrame(payload, (err) => {
                 if (err) {
-                    this.emitter.emit('status', 'ERROR', `Error sending raw command: ${err.message}`);
+                    this.emitter.emit('status', 'WARNING', `Error sending raw command: ${err.message}`);
                 } else {
                     this.emitter.emit('status', 'RAW_COMMAND_SENT', `Command sent`);
                 }
@@ -2178,8 +2212,8 @@ let found = 0;
             return { success: false, message: 'Not connected.' };
         }
 
-        if (typeof panelMemNum !== 'number' || panelMemNum < 1 || panelMemNum > 99) {
-            return { success: false, message: 'Invalid panel memory number (must be 1-99).' };
+        if (!Number.isInteger(panelMemNum) || panelMemNum < 1 || panelMemNum > 99) {
+            return { success: false, message: 'Invalid panel memory number (must be a whole number from 1-99).' };
         }
 
         try {
@@ -2189,7 +2223,7 @@ let found = 0;
 
             this.sendToFrame(payload, (err) => {
                 if (err) {
-                    this.emitter.emit('status', 'ERROR', `Error sending panel memory: ${err.message}`);
+                    this.emitter.emit('status', 'WARNING', `Error sending panel memory: ${err.message}`);
                 } else {
                     this.emitter.emit('status', 'PANEL_MEM_SENT', `Panel Memory ${panelMemNum}`);
                 }
@@ -2208,6 +2242,9 @@ let found = 0;
         if (pid !== 0x104A && pid !== 0x103A) {
             return { success: false, message: 'Invalid crosspoint PID.' };
         }
+        if (!(Number.isInteger(did) && did >= 0 && did <= 0xFFFFFFFF)) {
+            return { success: false, message: 'Invalid target DID.' };
+        }
         if (!Number.isInteger(sourceNum) || sourceNum < 1 || sourceNum > 809) {
             return { success: false, message: 'Invalid source number (must be a whole number from 1-809).' };
         }
@@ -2217,7 +2254,7 @@ let found = 0;
             const payload = this.buildSetParam(pid, 0x0100, did, data);
             this.sendToFrame(payload, (err) => {
                 if (err) {
-                    this.emitter.emit('status', 'ERROR', `Error sending crosspoint: ${err.message}`);
+                    this.emitter.emit('status', 'WARNING', `Error sending crosspoint: ${err.message}`);
                 } else {
                     // meState contains only A-D buses (PID 0x104A). Keyer DIDs
                     // share their low byte, so PID 0x103A must not update this cache.
@@ -2250,11 +2287,14 @@ let found = 0;
         if (eid !== 0x0043 && eid !== 0x0044) {
             return { success: false, message: 'Invalid transition EID.' };
         }
+        if (!(Number.isInteger(did) && did >= 0 && did <= 0xFFFFFFFF)) {
+            return { success: false, message: 'Invalid target DID.' };
+        }
         try {
             const payload = this.buildSetEvent(eid, did);
             this.sendToFrame(payload, (err) => {
                 if (err) {
-                    this.emitter.emit('status', 'ERROR', `Error sending transition: ${err.message}`);
+                    this.emitter.emit('status', 'WARNING', `Error sending transition: ${err.message}`);
                 } else {
                     this.emitter.emit('status', 'TRANSITION_SENT', `EID 0x${eid.toString(16)} DID 0x${did.toString(16)}`);
                 }
@@ -2275,7 +2315,7 @@ let found = 0;
         try {
             const payload = this.buildSetEvent(eid, did, Buffer.from(data));
             this.sendToFrame(payload, (err) => {
-                if (err) this.emitter.emit('status', 'ERROR', `Error sending timeline command: ${err.message}`);
+                if (err) this.emitter.emit('status', 'WARNING', `Error sending timeline command: ${err.message}`);
                 else this.emitter.emit('status', 'TIMELINE_SENT', `EID 0x${eid.toString(16)} DID 0x${did.toString(16)}`);
             });
             return { success: true, message: 'Timeline command sent' };
@@ -2288,11 +2328,14 @@ let found = 0;
         if (this.isClosing || this.mainHandshakeStage !== 9) {
             return { success: false, message: 'Not connected.' };
         }
-        if (typeof eMemNum !== 'number' || eMemNum < 0 || eMemNum > 999) {
-            return { success: false, message: 'Invalid EMEM number (must be 0-999).' };
+        if (!Number.isInteger(eMemNum) || eMemNum < 0 || eMemNum > 999) {
+            return { success: false, message: 'Invalid EMEM number (must be a whole number from 0-999).' };
         }
-        if (typeof mode !== 'number' || mode < 0 || mode > 2) {
-            return { success: false, message: 'Invalid EMEM mode (must be 0-2).' };
+        if (!Number.isInteger(mode) || mode < 0 || mode > 2) {
+            return { success: false, message: 'Invalid EMEM mode (must be a whole number from 0-2).' };
+        }
+        if (!(Number.isInteger(did) && did >= 0 && did <= 0xFFFFFFFF)) {
+            return { success: false, message: 'Invalid target DID.' };
         }
         try {
             const data = Buffer.alloc(8);
@@ -2301,7 +2344,7 @@ let found = 0;
             const payload = this.buildSetEvent(0x0041, did, data);
             this.sendToFrame(payload, (err) => {
                 if (err) {
-                    this.emitter.emit('status', 'ERROR', `Error sending targeted EMEM: ${err.message}`);
+                    this.emitter.emit('status', 'WARNING', `Error sending targeted EMEM: ${err.message}`);
                 } else {
                     this.emitter.emit('status', 'EMEM_TARGETED_SENT', `EMEM ${eMemNum} DID 0x${did.toString(16)} mode ${mode}`);
                 }
@@ -2461,14 +2504,13 @@ let found = 0;
         ];
         let index = 0;
         const sendNext = () => {
-            if (this.isClosing || index >= parameters.length) {
-                if (index >= parameters.length) {
-                    const list = this.buildListSubscriptionPacket(4, did);
-                    this.timelineKeyframeSubscriptionId = list.subId;
-                    this.sendToFrame(list.packet);
-                    this.timelineSubscribed = true;
-                    this.emitter.emit('status', 'TIMELINE_SUBSCRIBED', 'Subscribed to master timeline state and keyframes');
-                }
+            if (this.isClosing) return;
+            if (index >= parameters.length) {
+                const list = this.buildListSubscriptionPacket(4, did);
+                this.timelineKeyframeSubscriptionId = list.subId;
+                this.sendToFrame(list.packet);
+                this.timelineSubscribed = true;
+                this.emitter.emit('status', 'TIMELINE_SUBSCRIBED', 'Subscribed to master timeline state and keyframes');
                 return;
             }
             const parameter = parameters[index++];
@@ -2806,7 +2848,7 @@ let found = 0;
                         const signature = msg.readUInt16BE(pb + 8);
                         const marker = msg[pb + 12];
 
-                        if (signature === 0x104a && marker === 0x19) {
+                        if (signature === 0x104a && marker === 0x19 && payLen >= 22) {
                             // AUX response
                             const bus = msg[pb + 15];                    // Bus index (0-95)
                             const sourceNum = msg.readUInt16BE(pb + 20); // Source value
@@ -2840,7 +2882,7 @@ let found = 0;
                                     });
                                 }
                             }
-                        } else if (signature === 0x104a && marker === 0x04) {
+                        } else if (signature === 0x104a && marker === 0x04 && payLen >= 22) {
                             // ME Bus response — track state and emit changes
                             const addr = msg[pb + 15];
                             const sourceNum = msg.readUInt16BE(pb + 20);

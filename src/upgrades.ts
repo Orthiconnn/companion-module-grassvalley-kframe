@@ -6,7 +6,7 @@ import {
 	type CompanionStaticUpgradeScript,
 	type CompanionUpgradeContext,
 } from '@companion-module/base'
-import type { ModuleConfig } from './config.js'
+import { maximumRetries, type ModuleConfig } from './config.js'
 
 type LegacyConfig = ModuleConfig & {
 	suite?: string
@@ -95,7 +95,7 @@ export const UpgradeScripts: CompanionStaticUpgradeScript<ModuleConfig>[] = [
 						suite2: suite === 'suite2a',
 						suite3: suite === 'suite3a',
 						suite4: suite === 'suite4a',
-						maxRetries: Number(oldConfig.maxRetries ?? 5),
+						maxRetries: maximumRetries(oldConfig),
 						_legacySuite: oldConfig.suite,
 					} as ModuleConfig)
 				: null,
@@ -111,6 +111,58 @@ export const UpgradeScripts: CompanionStaticUpgradeScript<ModuleConfig>[] = [
 		for (const action of updatedActions) action.options.showSuite = literal(true)
 		return {
 			updatedConfig: null,
+			updatedActions,
+			updatedFeedbacks: [],
+		}
+	},
+	// Index 2 was the last script of grassvalley-kframe 0.9.1 (suite fill, textSize,
+	// textSize), so those connections resume at index 3. Intentionally empty.
+	(): CompanionStaticUpgradeResult<ModuleConfig, undefined> => ({
+		updatedConfig: null,
+		updatedActions: [],
+		updatedFeedbacks: [],
+	}),
+	// Idempotent catch-up for every earlier layout: fill only missing config keys
+	// and action options. Append new scripts after this one; never reorder.
+	(
+		_context: CompanionUpgradeContext<ModuleConfig>,
+		props: CompanionStaticUpgradeProps<ModuleConfig, undefined>,
+	): CompanionStaticUpgradeResult<ModuleConfig, undefined> => {
+		const config = props.config as Partial<ModuleConfig> | null
+		let updatedConfig: ModuleConfig | null = null
+		const suiteKeys = ['suite1', 'suite2', 'suite3', 'suite4'] as const
+		if (config && (suiteKeys.some((key) => typeof config[key] !== 'boolean') || config.maxRetries === undefined)) {
+			const referenced = new Set(
+				props.actions.map((action) => {
+					const suite = action.options.suite?.value
+					return typeof suite === 'string' ? /^suite([1-4])a$/.exec(suite)?.[1] : undefined
+				}),
+			)
+			const anyReferenced = suiteKeys.some((_key, index) => referenced.has(String(index + 1)))
+			const suiteValue = (index: number): boolean => {
+				const current = config[suiteKeys[index]]
+				if (typeof current === 'boolean') return current
+				return anyReferenced ? referenced.has(String(index + 1)) : index === 0
+			}
+			updatedConfig = {
+				...(config as ModuleConfig),
+				host: String(config.host ?? ''),
+				suite1: suiteValue(0),
+				suite2: suiteValue(1),
+				suite3: suiteValue(2),
+				suite4: suiteValue(3),
+				maxRetries: maximumRetries(config),
+			}
+		}
+		const updatedActions = props.actions.filter(
+			(action) => action.options.showSuite === undefined || action.options.textSize === undefined,
+		)
+		for (const action of updatedActions) {
+			action.options.showSuite ??= literal(true)
+			action.options.textSize ??= literal(100)
+		}
+		return {
+			updatedConfig,
 			updatedActions,
 			updatedFeedbacks: [],
 		}

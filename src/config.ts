@@ -17,7 +17,9 @@ export function suiteEnabled(config: Partial<ModuleConfig>, suite: number): bool
 }
 
 export function maximumRetries(config: Partial<ModuleConfig>): number {
-	const value = Number(config.maxRetries)
+	// Blank, null, or boolean legacy values mean "unset", not 0 retries.
+	const raw: unknown = config.maxRetries
+	const value = typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : NaN
 	return Number.isFinite(value) ? Math.max(0, Math.min(20, Math.trunc(value))) : DEFAULT_MAX_RETRIES
 }
 
