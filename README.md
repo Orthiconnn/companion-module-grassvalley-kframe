@@ -1,12 +1,12 @@
-# Grass Valley KFrame Companion v2026.0.9.7
+# Grass Valley KFrame Companion v2026.0.9.8
 
 Major-version Bitfocus Companion implementation based on the Grass Valley Stream Deck application.
 
 ## Versioning
 
 - Module id: `grassvalley-kframe` (the next version of the existing Bitfocus K-Frame module)
-- Internal project version: `2026.0.9.7` (announced to the frame; `src/version.ts`, checked against package.json by `test/repro-version.mjs`)
-- Companion prerelease package version: `2026.0.9-beta.7` (SemVer)
+- Internal project version: `2026.0.9.8` (announced to the frame; `src/version.ts`, checked against package.json by `test/repro-version.mjs`)
+- Companion prerelease package version: `2026.0.9-beta.8` (SemVer)
 
 ## Source baseline
 
@@ -68,6 +68,14 @@ Manual and frame-initiated disconnects also refresh dropdowns and presets after 
 Disconnect cleanup also clears cached source names before announcing disconnection. AUX and crosspoint dropdowns then use remaining suites' source names or numbered fallback labels. The same four regression cases verify both source dropdowns and the cleared source-name getters.
 
 Validation on 2026-10-14: synthetic UDP and TCP packets reproduce the original stale-dropdown failure and pass after the fix. Tests cover dropdowns, presets, cleared names, unchanged batches, and disconnect cleanup in `test/repro-macro-dropdown.mjs`, included in `npm test`. Live frame names were not changed for this test.
+
+## Checks
+
+All code is checked; nothing is excluded. `yarn build` type-checks every source file with strict TypeScript, including the protocol layer (`src/protocol/*.cts`, CommonJS TypeScript). `yarn lint` runs eslint on `src/` and `test/`, and `yarn prettier --check .` covers the whole repository. `yarn test` (also `npm test`) builds and runs every test. CI runs build, lint, formatting and the tests on every push.
+
+## 2026.0.9.8 checks everywhere
+
+The protocol layer is now typed and linted like the rest of the module (it previously opted out with `@ts-nocheck` and eslint/prettier ignores). `sendTimelineEvent` now rejects event IDs, DIDs and data bytes outside their wire ranges instead of letting `Buffer.from` wrap them. Write-only fields are removed.
 
 ## 2026.0.9.6 Companion-only cleanup
 

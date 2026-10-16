@@ -61,7 +61,7 @@ for (const [type, [map, options]] of Object.entries(types)) {
 }
 
 test('Macro feedback still renders the remaining action after another is removed', () => {
-	const { module, actions, feedbacks } = setup()
+	const { actions, feedbacks } = setup()
 	const first = action('first', { value: 1, labelOverride: 'First' })
 	const second = action('second', { value: 2, labelOverride: 'Second' })
 	actions.macro_play.subscribe(first)

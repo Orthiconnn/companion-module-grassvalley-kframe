@@ -1,9 +1,39 @@
-// @ts-nocheck
 // Connection Manager - manages multiple simultaneous handshake connections
-const EventEmitter = require('events')
-const HandshakeConnection = require('./handshake-connection-class.cjs')
+import EventEmitter = require('events')
+import HandshakeConnection = require('./handshake-connection-class.cjs')
+
+type ConnectionPorts = ConstructorParameters<typeof HandshakeConnection>[3]
+type FrameSocket = NonNullable<HandshakeConnection['tcpSocket'] | HandshakeConnection['mainClient']>
+type MacroCatalog = ReturnType<HandshakeConnection['getMacroCatalog']>
+type MacroRunState = ReturnType<HandshakeConnection['getMacroRunState']>
+type TimelineState = ReturnType<HandshakeConnection['getTimelineState']>
+type TransitionTelemetry = NonNullable<ReturnType<HandshakeConnection['getTransitionTelemetry']>>
+type SourceNameRecord = ReturnType<HandshakeConnection['getSourceNames']>[number]
+
+/** Snapshot of one connection for UI display. */
+interface ConnectionInfo {
+	id: string
+	suite: string
+	host: string
+	ports: { main: number; listener: number; dynamic: number }
+	stage: number
+	connected: boolean
+	fullyConnected: boolean
+	protocol: HandshakeConnection['protocol']
+	frameVersion: string | null
+}
+
+/** Result returned when no connection exists for the id; matches HandshakeConnection's results. */
+interface CommandResult {
+	success: boolean
+	message: string
+}
 
 class ConnectionManager {
+	connections: Map<string, HandshakeConnection>
+	pendingCreates: Map<string, Promise<void>>
+	emitter: EventEmitter
+
 	constructor() {
 		this.connections = new Map() // connectionId -> HandshakeConnection
 		this.pendingCreates = new Map() // connectionId -> gate for the latest create
@@ -18,16 +48,21 @@ class ConnectionManager {
 	 * @param {object} customPorts - { mainPort, listenerPort }
 	 * @returns {Promise<function>} Cleanup function
 	 */
-	async createConnection(connectionId, targetHost, suite, customPorts, suiteName, moduleVersion, buildDate) {
+	async createConnection(
+		connectionId: string,
+		targetHost: string,
+		suite: string,
+		customPorts?: ConnectionPorts,
+		suiteName?: string,
+		moduleVersion?: string,
+		buildDate?: string,
+	): Promise<() => void> {
 		// Serialise replace-and-register per id so a concurrent create cannot be
 		// overwritten (and orphaned) while an older one awaits its disconnect.
 		const previous = this.pendingCreates.get(connectionId) ?? Promise.resolve()
-		let release
-		const gate = new Promise((resolve) => {
-			release = resolve
-		})
+		const { promise: gate, resolve: release } = Promise.withResolvers<void>()
 		this.pendingCreates.set(connectionId, gate)
-		let connection
+		let connection: HandshakeConnection
 		try {
 			await previous
 			// Close existing connection if it exists
@@ -60,7 +95,15 @@ class ConnectionManager {
 		}
 	}
 
-	registerConnection(connectionId, targetHost, suite, customPorts, suiteName, moduleVersion, buildDate) {
+	registerConnection(
+		connectionId: string,
+		targetHost: string,
+		suite: string,
+		customPorts?: ConnectionPorts,
+		suiteName?: string,
+		moduleVersion?: string,
+		buildDate?: string,
+	): HandshakeConnection {
 		// Create new connection instance
 		const connection = new HandshakeConnection(
 			connectionId,
@@ -73,35 +116,35 @@ class ConnectionManager {
 		)
 
 		// Forward events from connection to manager emitter
-		connection.emitter.on('status', (type, message) => {
+		connection.emitter.on('status', (type: string, message: unknown) => {
 			// Emit with connectionId so listeners know which connection this is for
 			if (this.connections.get(connectionId) === connection) this.emitter.emit('status', connectionId, type, message)
 		})
 
 		// Forward AUX state change events
-		connection.emitter.on('auxStateChanged', (data) => {
+		connection.emitter.on('auxStateChanged', (data: unknown) => {
 			this.emitter.emit('auxStateChanged', connectionId, data)
 		})
 
 		// Forward ME state change events
-		connection.emitter.on('meStateChanged', (data) => {
+		connection.emitter.on('meStateChanged', (data: unknown) => {
 			this.emitter.emit('meStateChanged', connectionId, data)
 		})
 
-		connection.emitter.on('timelineStateChanged', (data) => {
+		connection.emitter.on('timelineStateChanged', (data: unknown) => {
 			this.emitter.emit('timelineStateChanged', connectionId, data)
 		})
 
-		connection.emitter.on('imageStoreStateChanged', (data) => {
+		connection.emitter.on('imageStoreStateChanged', (data: unknown) => {
 			this.emitter.emit('imageStoreStateChanged', connectionId, data)
 		})
 
-		connection.emitter.on('transitionTelemetryChanged', (data) => {
+		connection.emitter.on('transitionTelemetryChanged', (data: unknown) => {
 			this.emitter.emit('transitionTelemetryChanged', connectionId, data)
 		})
 
 		// Forward source name update events
-		connection.emitter.on('sourceNamesUpdated', (data) => {
+		connection.emitter.on('sourceNamesUpdated', (data: unknown) => {
 			this.emitter.emit('sourceNamesUpdated', connectionId, data)
 		})
 
@@ -113,13 +156,16 @@ class ConnectionManager {
 	/**
 	 * Disconnect a specific connection
 	 */
-	async disconnectConnection(connectionId) {
+	async disconnectConnection(connectionId: string): Promise<void> {
 		const connection = this.connections.get(connectionId)
 		if (connection) {
-			const sockets = [connection.tcpSocket, connection.mainClient, connection.listenerClient].filter(Boolean)
+			const sockets = [connection.tcpSocket, connection.mainClient, connection.listenerClient].filter(
+				(socket: FrameSocket | null): socket is FrameSocket => Boolean(socket),
+			)
 			const closed = sockets.map(
-				(socket) =>
-					new Promise((resolve) => {
+				// async still runs the executor (and registers 'close') synchronously, before cleanup().
+				async (socket: EventEmitter) =>
+					new Promise<void>((resolve) => {
 						const timeout = setTimeout(resolve, 100)
 						socket.once('close', () => {
 							clearTimeout(timeout)
@@ -136,21 +182,21 @@ class ConnectionManager {
 	/**
 	 * Get a connection by ID
 	 */
-	getConnection(connectionId) {
+	getConnection(connectionId: string): HandshakeConnection | undefined {
 		return this.connections.get(connectionId)
 	}
 
 	/**
 	 * Get all active connection IDs
 	 */
-	getActiveConnections() {
+	getActiveConnections(): string[] {
 		return Array.from(this.connections.keys())
 	}
 
 	/**
 	 * Send a macro command to a specific connection
 	 */
-	sendMacro(connectionId, macroNum) {
+	sendMacro(connectionId: string, macroNum: number): CommandResult {
 		const connection = this.connections.get(connectionId)
 		if (!connection) {
 			return { success: false, message: `No connection found: ${connectionId}` }
@@ -158,7 +204,7 @@ class ConnectionManager {
 		return connection.sendMacro(macroNum)
 	}
 
-	sendMacroStop(connectionId, macroNum) {
+	sendMacroStop(connectionId: string, macroNum: number): CommandResult {
 		const connection = this.connections.get(connectionId)
 		if (!connection) {
 			return { success: false, message: `No connection found: ${connectionId}` }
@@ -166,7 +212,7 @@ class ConnectionManager {
 		return connection.sendMacroStop(macroNum)
 	}
 
-	sendMacroStopAll(connectionId) {
+	sendMacroStopAll(connectionId: string): CommandResult {
 		const connection = this.connections.get(connectionId)
 		if (!connection) {
 			return { success: false, message: `No connection found: ${connectionId}` }
@@ -177,7 +223,7 @@ class ConnectionManager {
 	/**
 	 * Send an aux routing command to a specific connection
 	 */
-	sendAuxRoute(connectionId, auxNum, sourceNum, transitionType = 'cut') {
+	sendAuxRoute(connectionId: string, auxNum: number, sourceNum: number, transitionType = 'cut'): CommandResult {
 		const connection = this.connections.get(connectionId)
 		if (!connection) {
 			return { success: false, message: `No connection found: ${connectionId}` }
@@ -188,7 +234,7 @@ class ConnectionManager {
 	/**
 	 * Send an image store command to a specific connection
 	 */
-	sendImageStore(connectionId, outputNum, imageNum) {
+	sendImageStore(connectionId: string, outputNum: number, imageNum: number): CommandResult {
 		const connection = this.connections.get(connectionId)
 		if (!connection) {
 			return { success: false, message: `No connection found: ${connectionId}` }
@@ -199,7 +245,7 @@ class ConnectionManager {
 	/**
 	 * Send an image store input command to a specific connection
 	 */
-	sendImageStoreInput(connectionId, inputNum) {
+	sendImageStoreInput(connectionId: string, inputNum: number): CommandResult {
 		const connection = this.connections.get(connectionId)
 		if (!connection) {
 			return { success: false, message: `No connection found: ${connectionId}` }
@@ -207,7 +253,7 @@ class ConnectionManager {
 		return connection.sendImageStoreInput(inputNum)
 	}
 
-	sendEMem(connectionId, eMemNum) {
+	sendEMem(connectionId: string, eMemNum: number): CommandResult {
 		const connection = this.connections.get(connectionId)
 		if (!connection) {
 			return { success: false, message: `No connection found: ${connectionId}` }
@@ -215,7 +261,7 @@ class ConnectionManager {
 		return connection.sendEMem(eMemNum)
 	}
 
-	sendCrosspoint(connectionId, pid, did, sourceNum) {
+	sendCrosspoint(connectionId: string, pid: number, did: number, sourceNum: number): CommandResult {
 		const connection = this.connections.get(connectionId)
 		if (!connection) {
 			return { success: false, message: `No connection found: ${connectionId}` }
@@ -223,7 +269,7 @@ class ConnectionManager {
 		return connection.sendCrosspoint(pid, did, sourceNum)
 	}
 
-	sendTransitionEvent(connectionId, eid, did) {
+	sendTransitionEvent(connectionId: string, eid: number, did: number): CommandResult {
 		const connection = this.connections.get(connectionId)
 		if (!connection) {
 			return { success: false, message: `No connection found: ${connectionId}` }
@@ -231,7 +277,7 @@ class ConnectionManager {
 		return connection.sendTransitionEvent(eid, did)
 	}
 
-	sendEMemTargeted(connectionId, eMemNum, did, mode) {
+	sendEMemTargeted(connectionId: string, eMemNum: number, did: number, mode: number): CommandResult {
 		const connection = this.connections.get(connectionId)
 		if (!connection) {
 			return { success: false, message: `No connection found: ${connectionId}` }
@@ -242,7 +288,7 @@ class ConnectionManager {
 	/**
 	 * Send a raw hex command to a specific connection
 	 */
-	sendRawCommand(connectionId, hexCommand) {
+	sendRawCommand(connectionId: string, hexCommand: string): CommandResult {
 		const connection = this.connections.get(connectionId)
 		if (!connection) {
 			return { success: false, message: `No connection found: ${connectionId}` }
@@ -253,7 +299,7 @@ class ConnectionManager {
 	/**
 	 * Send a panel memory command to a specific connection
 	 */
-	sendPanelMem(connectionId, panelMemNum) {
+	sendPanelMem(connectionId: string, panelMemNum: number): CommandResult {
 		const connection = this.connections.get(connectionId)
 		if (!connection) {
 			return { success: false, message: `No connection found: ${connectionId}` }
@@ -264,7 +310,7 @@ class ConnectionManager {
 	/**
 	 * Get connection info for UI display
 	 */
-	getConnectionInfo(connectionId) {
+	getConnectionInfo(connectionId: string): ConnectionInfo | null {
 		const connection = this.connections.get(connectionId)
 		if (!connection) return null
 
@@ -288,7 +334,7 @@ class ConnectionManager {
 	/**
 	 * Get macro name (OLED) for a specific macro number
 	 */
-	getMacroName(connectionId, macroNum) {
+	getMacroName(connectionId: string, macroNum: number): string | null {
 		const connection = this.connections.get(connectionId)
 		if (!connection) return null
 		return connection.getMacroName(macroNum)
@@ -297,7 +343,7 @@ class ConnectionManager {
 	/**
 	 * Get full macro catalog for a connection
 	 */
-	getMacroCatalog(connectionId) {
+	getMacroCatalog(connectionId: string): MacroCatalog | null {
 		const connection = this.connections.get(connectionId)
 		if (!connection) return null
 		return connection.getMacroCatalog()
@@ -307,7 +353,7 @@ class ConnectionManager {
 	 * Get macro run-state for a connection
 	 * Returns { macroStatus: {macroNum: eMacroStatus}, lastPlayedMacro, runSeq }
 	 */
-	getMacroRunState(connectionId) {
+	getMacroRunState(connectionId: string): MacroRunState | null {
 		const connection = this.connections.get(connectionId)
 		if (!connection) return null
 		return connection.getMacroRunState()
@@ -316,7 +362,7 @@ class ConnectionManager {
 	/**
 	 * Get status of a specific macro (null if not active)
 	 */
-	getMacroStatus(connectionId, macroNum) {
+	getMacroStatus(connectionId: string, macroNum: number): number | null {
 		const connection = this.connections.get(connectionId)
 		if (!connection) return null
 		return connection.getMacroStatusForMacro(macroNum)
@@ -325,7 +371,7 @@ class ConnectionManager {
 	/**
 	 * Subscribe to AUX bus source selection for a connection
 	 */
-	subscribeToAuxBus(connectionId) {
+	subscribeToAuxBus(connectionId: string): CommandResult {
 		const connection = this.connections.get(connectionId)
 		if (!connection) {
 			return { success: false, message: `No connection found: ${connectionId}` }
@@ -336,7 +382,7 @@ class ConnectionManager {
 	/**
 	 * Get current source on a specific AUX bus
 	 */
-	getAuxSource(connectionId, auxNum) {
+	getAuxSource(connectionId: string, auxNum: number): number | null {
 		const connection = this.connections.get(connectionId)
 		if (!connection) return null
 		return connection.getAuxSource(auxNum)
@@ -345,7 +391,7 @@ class ConnectionManager {
 	/**
 	 * Subscribe to ME bus source selection for a connection
 	 */
-	subscribeToMEBus(connectionId) {
+	subscribeToMEBus(connectionId: string): CommandResult {
 		const connection = this.connections.get(connectionId)
 		if (!connection) {
 			return { success: false, message: `No connection found: ${connectionId}` }
@@ -356,53 +402,53 @@ class ConnectionManager {
 	/**
 	 * Get current source on a specific ME bus
 	 */
-	getKeyerSource(connectionId, address) {
+	getKeyerSource(connectionId: string, address: number): number | null {
 		return this.connections.get(connectionId)?.getKeyerSource(address) ?? null
 	}
 
-	getMESource(connectionId, address) {
+	getMESource(connectionId: string, address: number): number | null {
 		const connection = this.connections.get(connectionId)
 		if (!connection) return null
 		return connection.getMESource(address)
 	}
 
-	getTimelineState(connectionId) {
+	getTimelineState(connectionId: string): TimelineState | null {
 		const connection = this.connections.get(connectionId)
 		if (!connection) return null
 		return connection.getTimelineState()
 	}
 
-	subscribeToMasterTimeline(connectionId) {
+	subscribeToMasterTimeline(connectionId: string): CommandResult {
 		const connection = this.connections.get(connectionId)
 		if (!connection) return { success: false, message: `No connection found: ${connectionId}` }
 		return connection.subscribeToMasterTimeline()
 	}
 
-	subscribeToImageStore(connectionId) {
+	subscribeToImageStore(connectionId: string): CommandResult {
 		const connection = this.connections.get(connectionId)
 		if (!connection) return { success: false, message: `No connection found: ${connectionId}` }
 		return connection.subscribeToImageStore()
 	}
 
-	getImageStoreImage(connectionId, output) {
+	getImageStoreImage(connectionId: string, output: number): number | null {
 		const connection = this.connections.get(connectionId)
 		if (!connection) return null
 		return connection.getImageStoreImage(output)
 	}
 
-	subscribeToTransitionTelemetry(connectionId) {
+	subscribeToTransitionTelemetry(connectionId: string): CommandResult {
 		const connection = this.connections.get(connectionId)
 		if (!connection) return { success: false, message: `No connection found: ${connectionId}` }
 		return connection.subscribeToTransitionTelemetry()
 	}
 
-	getTransitionTelemetry(connectionId, did) {
+	getTransitionTelemetry(connectionId: string, did: number): TransitionTelemetry | null {
 		const connection = this.connections.get(connectionId)
 		if (!connection) return null
 		return connection.getTransitionTelemetry(did)
 	}
 
-	sendTimelineEvent(connectionId, eid, did, data) {
+	sendTimelineEvent(connectionId: string, eid: number, did: number, data: number[]): CommandResult {
 		const connection = this.connections.get(connectionId)
 		if (!connection) return { success: false, message: `No connection found: ${connectionId}` }
 		return connection.sendTimelineEvent(eid, did, data)
@@ -411,7 +457,7 @@ class ConnectionManager {
 	/**
 	 * Subscribe to source names (0x0210 + 0x020b) for a connection
 	 */
-	subscribeToSourceNames(connectionId) {
+	subscribeToSourceNames(connectionId: string): CommandResult {
 		const connection = this.connections.get(connectionId)
 		if (!connection) {
 			return { success: false, message: `No connection found: ${connectionId}` }
@@ -419,7 +465,7 @@ class ConnectionManager {
 		return connection.subscribeToSourceNames()
 	}
 
-	getSourceNames(connectionId) {
+	getSourceNames(connectionId: string): SourceNameRecord[] {
 		const connection = this.connections.get(connectionId)
 		if (!connection) return []
 		return connection.getSourceNames()
@@ -429,7 +475,7 @@ class ConnectionManager {
 	 * Resolve a source number to the best display name (menu > oled > panel > eng)
 	 * Returns null if no name found - caller should fall back to hardcoded labels
 	 */
-	resolveSourceDisplayName(connectionId, sourceNum) {
+	resolveSourceDisplayName(connectionId: string, sourceNum: number): string | null {
 		const connection = this.connections.get(connectionId)
 		if (!connection) return null
 		return connection.resolveSourceDisplayName(sourceNum)
@@ -440,47 +486,63 @@ class ConnectionManager {
 const connectionManager = new ConnectionManager()
 
 // Export both the class and singleton
-module.exports = {
+export = {
 	ConnectionManager,
 	connectionManager,
 	// Convenience exports
-	createConnection: (id, host, suite, ports, suiteName, moduleVersion, buildDate) =>
+	createConnection: async (
+		id: string,
+		host: string,
+		suite: string,
+		ports?: ConnectionPorts,
+		suiteName?: string,
+		moduleVersion?: string,
+		buildDate?: string,
+	): Promise<() => void> =>
 		connectionManager.createConnection(id, host, suite, ports, suiteName, moduleVersion, buildDate),
-	disconnectConnection: (id) => connectionManager.disconnectConnection(id),
-	getConnection: (id) => connectionManager.getConnection(id),
-	sendMacro: (id, macroNum) => connectionManager.sendMacro(id, macroNum),
-	sendMacroStop: (id, macroNum) => connectionManager.sendMacroStop(id, macroNum),
-	sendMacroStopAll: (id) => connectionManager.sendMacroStopAll(id),
-	sendAuxRoute: (id, auxNum, sourceNum, transitionType) =>
+	disconnectConnection: async (id: string): Promise<void> => connectionManager.disconnectConnection(id),
+	getConnection: (id: string): HandshakeConnection | undefined => connectionManager.getConnection(id),
+	sendMacro: (id: string, macroNum: number): CommandResult => connectionManager.sendMacro(id, macroNum),
+	sendMacroStop: (id: string, macroNum: number): CommandResult => connectionManager.sendMacroStop(id, macroNum),
+	sendMacroStopAll: (id: string): CommandResult => connectionManager.sendMacroStopAll(id),
+	sendAuxRoute: (id: string, auxNum: number, sourceNum: number, transitionType?: string): CommandResult =>
 		connectionManager.sendAuxRoute(id, auxNum, sourceNum, transitionType),
-	sendImageStore: (id, outputNum, imageNum) => connectionManager.sendImageStore(id, outputNum, imageNum),
-	sendImageStoreInput: (id, inputNum) => connectionManager.sendImageStoreInput(id, inputNum),
-	sendEMem: (id, eMemNum) => connectionManager.sendEMem(id, eMemNum),
-	sendCrosspoint: (id, pid, did, sourceNum) => connectionManager.sendCrosspoint(id, pid, did, sourceNum),
-	sendTransitionEvent: (id, eid, did) => connectionManager.sendTransitionEvent(id, eid, did),
-	sendEMemTargeted: (id, eMemNum, did, mode) => connectionManager.sendEMemTargeted(id, eMemNum, did, mode),
-	sendRawCommand: (id, hexCommand) => connectionManager.sendRawCommand(id, hexCommand),
-	sendPanelMem: (id, panelMemNum) => connectionManager.sendPanelMem(id, panelMemNum),
-	getMacroName: (id, macroNum) => connectionManager.getMacroName(id, macroNum),
-	getMacroCatalog: (id) => connectionManager.getMacroCatalog(id),
-	getMacroRunState: (id) => connectionManager.getMacroRunState(id),
-	getMacroStatus: (id, macroNum) => connectionManager.getMacroStatus(id, macroNum),
-	subscribeToAuxBus: (id) => connectionManager.subscribeToAuxBus(id),
-	getAuxSource: (id, auxNum) => connectionManager.getAuxSource(id, auxNum),
-	subscribeToMEBus: (id) => connectionManager.subscribeToMEBus(id),
-	getKeyerSource: (id, address) => connectionManager.getKeyerSource(id, address),
-	getMESource: (id, address) => connectionManager.getMESource(id, address),
-	getTimelineState: (id) => connectionManager.getTimelineState(id),
-	subscribeToMasterTimeline: (id) => connectionManager.subscribeToMasterTimeline(id),
-	subscribeToImageStore: (id) => connectionManager.subscribeToImageStore(id),
-	getImageStoreImage: (id, output) => connectionManager.getImageStoreImage(id, output),
-	subscribeToTransitionTelemetry: (id) => connectionManager.subscribeToTransitionTelemetry(id),
-	getTransitionTelemetry: (id, did) => connectionManager.getTransitionTelemetry(id, did),
-	sendTimelineEvent: (id, eid, did, data) => connectionManager.sendTimelineEvent(id, eid, did, data),
-	subscribeToSourceNames: (id) => connectionManager.subscribeToSourceNames(id),
-	getSourceNames: (id) => connectionManager.getSourceNames(id),
-	resolveSourceDisplayName: (id, sourceNum) => connectionManager.resolveSourceDisplayName(id, sourceNum),
-	getConnectionInfo: (id) => connectionManager.getConnectionInfo(id),
-	getActiveConnections: () => connectionManager.getActiveConnections(),
+	sendImageStore: (id: string, outputNum: number, imageNum: number): CommandResult =>
+		connectionManager.sendImageStore(id, outputNum, imageNum),
+	sendImageStoreInput: (id: string, inputNum: number): CommandResult =>
+		connectionManager.sendImageStoreInput(id, inputNum),
+	sendEMem: (id: string, eMemNum: number): CommandResult => connectionManager.sendEMem(id, eMemNum),
+	sendCrosspoint: (id: string, pid: number, did: number, sourceNum: number): CommandResult =>
+		connectionManager.sendCrosspoint(id, pid, did, sourceNum),
+	sendTransitionEvent: (id: string, eid: number, did: number): CommandResult =>
+		connectionManager.sendTransitionEvent(id, eid, did),
+	sendEMemTargeted: (id: string, eMemNum: number, did: number, mode: number): CommandResult =>
+		connectionManager.sendEMemTargeted(id, eMemNum, did, mode),
+	sendRawCommand: (id: string, hexCommand: string): CommandResult => connectionManager.sendRawCommand(id, hexCommand),
+	sendPanelMem: (id: string, panelMemNum: number): CommandResult => connectionManager.sendPanelMem(id, panelMemNum),
+	getMacroName: (id: string, macroNum: number): string | null => connectionManager.getMacroName(id, macroNum),
+	getMacroCatalog: (id: string): MacroCatalog | null => connectionManager.getMacroCatalog(id),
+	getMacroRunState: (id: string): MacroRunState | null => connectionManager.getMacroRunState(id),
+	getMacroStatus: (id: string, macroNum: number): number | null => connectionManager.getMacroStatus(id, macroNum),
+	subscribeToAuxBus: (id: string): CommandResult => connectionManager.subscribeToAuxBus(id),
+	getAuxSource: (id: string, auxNum: number): number | null => connectionManager.getAuxSource(id, auxNum),
+	subscribeToMEBus: (id: string): CommandResult => connectionManager.subscribeToMEBus(id),
+	getKeyerSource: (id: string, address: number): number | null => connectionManager.getKeyerSource(id, address),
+	getMESource: (id: string, address: number): number | null => connectionManager.getMESource(id, address),
+	getTimelineState: (id: string): TimelineState | null => connectionManager.getTimelineState(id),
+	subscribeToMasterTimeline: (id: string): CommandResult => connectionManager.subscribeToMasterTimeline(id),
+	subscribeToImageStore: (id: string): CommandResult => connectionManager.subscribeToImageStore(id),
+	getImageStoreImage: (id: string, output: number): number | null => connectionManager.getImageStoreImage(id, output),
+	subscribeToTransitionTelemetry: (id: string): CommandResult => connectionManager.subscribeToTransitionTelemetry(id),
+	getTransitionTelemetry: (id: string, did: number): TransitionTelemetry | null =>
+		connectionManager.getTransitionTelemetry(id, did),
+	sendTimelineEvent: (id: string, eid: number, did: number, data: number[]): CommandResult =>
+		connectionManager.sendTimelineEvent(id, eid, did, data),
+	subscribeToSourceNames: (id: string): CommandResult => connectionManager.subscribeToSourceNames(id),
+	getSourceNames: (id: string): SourceNameRecord[] => connectionManager.getSourceNames(id),
+	resolveSourceDisplayName: (id: string, sourceNum: number): string | null =>
+		connectionManager.resolveSourceDisplayName(id, sourceNum),
+	getConnectionInfo: (id: string): ConnectionInfo | null => connectionManager.getConnectionInfo(id),
+	getActiveConnections: (): string[] => connectionManager.getActiveConnections(),
 	clientEmitter: connectionManager.emitter,
 }

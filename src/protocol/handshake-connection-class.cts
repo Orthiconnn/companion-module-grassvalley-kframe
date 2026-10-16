@@ -1,10 +1,111 @@
-// @ts-nocheck
 // Class-based handshake connection - supports multiple simultaneous connections
 // Supports both TCP (V16+/V18) and UDP (V14) protocols with auto-detection
-const dgram = require('dgram')
-const net = require('net')
-const EventEmitter = require('events')
-const crypto = require('crypto')
+
+import dgram = require('dgram')
+import net = require('net')
+import EventEmitter = require('events')
+import crypto = require('crypto')
+
+/** Result returned by every public command/subscription method. */
+interface CommandResult {
+	success: boolean
+	message: string
+}
+
+/** Local ports for the UDP sockets; either may be omitted (defaults 6130/6131, 0 = OS-assigned). */
+interface ConnectionPorts {
+	mainPort?: number
+	listenerPort?: number
+}
+
+type TransportProtocol = 'tcp' | 'udp'
+
+/** Completion callback shared by net.Socket#write and dgram.Socket#send. */
+type SendCallback = (err?: Error | null) => void
+
+interface FrameInfo {
+	version: string | null
+	name: string | null
+	buildDate: string | null
+}
+
+interface MacroCatalogEntry {
+	oled: string
+	panel: string
+	comment: string
+}
+
+interface MacroQueueItem {
+	macroNum: number
+	macroPayload: Buffer
+	macroIdNum: number
+	eid: number
+}
+
+interface MacroRunState {
+	macroStatus: Record<number, number>
+	lastPlayedMacro: number | null
+	runSeq: number
+}
+
+/** One decoded entry of a macro status (sub_id 0x0234) push. */
+interface MacroStatusEntry {
+	index: number
+	macroNum: number
+	status: number
+}
+
+/** Operator (0x020b) and engineering (0x0210) names for one source. */
+interface SourceNameEntry {
+	oled: string
+	short: string
+	eng: string
+	panel: string
+	menu: string
+}
+
+type TimelineScalarKey = 'cursorTime' | 'duration' | 'pauseState' | 'runState'
+
+interface TimelineState {
+	cursorTime: number | null
+	duration: number | null
+	pauseState: number
+	runState: number | null
+	pausePoints: number[]
+}
+
+interface TimelineParameterSubscription {
+	pid: number
+	key: TimelineScalarKey
+}
+
+interface TimelineKeyframe {
+	time: number
+	pause: number
+}
+
+interface TransitionTelemetryState {
+	ramp: number
+	effectiveRate: number
+	active: boolean
+	direction: 'up' | 'down' | null
+}
+
+/** A scalar CPL parameter subscription target. */
+interface ParameterTarget {
+	did: number
+	pid: number
+}
+
+interface SubscriptionPacket {
+	packet: Buffer
+	subId: number
+}
+
+/** Message text of a caught value; Error instances keep their own message. */
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error)
+}
 
 // V18 TCP session framing constants
 const SESSION_HEADER = Buffer.from([0xb9, 0x91, 0x6f, 0x84])
@@ -16,7 +117,148 @@ const TCP_DETECT_TIMEOUT = 2000 // 2 seconds to detect V18+ frame
  * Each instance maintains its own sockets, state, and event emitter
  */
 class HandshakeConnection {
-	constructor(connectionId, targetHost, suite, customPorts, suiteName, moduleVersion, buildDate) {
+	connectionId: string
+	targetHost: string
+	suite: string
+	customPorts: ConnectionPorts | null | undefined
+	suiteName: string
+	moduleVersion: string
+	buildDate: string
+	clientName: string
+
+	// Connection state
+	mainClient: dgram.Socket | null
+	listenerClient: dgram.Socket | null
+	secondPhaseDynamicCommPort: number
+	announcedTargetPort: number
+	mainHandshakeStage: number
+	isClosing: boolean
+	startupAbort: AbortController
+
+	// Timers and intervals
+	heartbeatIntervalId: NodeJS.Timeout | null
+	packet1RetryIntervalId: NodeJS.Timeout | null
+	handshakeOverallTimeoutId: NodeJS.Timeout | null
+
+	// State tracking
+	lastHeartbeatResponseTime: number
+	missedHeartbeats: number
+	lastSentMacroId: number | null
+	macroQueue: MacroQueueItem[]
+	isSendingMacro: boolean
+	fullyConnected: boolean
+
+	// Message ID tracking
+	recentlyUsedIds: number[]
+	nextMacroId: number
+	lastUsedSessionId: number | null
+	udpMsgCounter?: number
+
+	// AUX subscription state
+	auxState: Map<number, number>
+	subscribedAuxes: Set<string>
+	nextSubscriptionId: number
+	subscriptionSequence: number
+
+	// ME bus subscription state
+	keyerState: Map<number, number>
+	meState: Map<number, number>
+	subscribedMEs: Set<string>
+
+	// Master E-MEM timeline
+	timelineState: TimelineState
+	timelineSubscriptionIds: Map<number, TimelineParameterSubscription>
+	timelineKeyframeSubscriptionId: number | null
+	timelineKeyframes: Map<number, TimelineKeyframe>
+	timelineSubscribed: boolean
+
+	// Image Store
+	imageStoreState: Map<number, number>
+	imageStoreSubscriptionIds: Map<number, number>
+	imageStoreSubscribed: boolean
+
+	// Transition telemetry
+	transitionTelemetry: Map<number, TransitionTelemetryState>
+	transitionSubscriptionIds: Map<number, ParameterTarget>
+	transitionTelemetrySubscribed: boolean
+
+	// Source names
+	sourceNames: Map<number, SourceNameEntry>
+	sourceNamesSubscribed: boolean
+
+	// TCP state (V16+/V18)
+	protocol: TransportProtocol
+	tcpSocket: net.Socket | null
+	tcpBuffer: Buffer
+	tcpAuthPayload?: Buffer | null
+	lastTcpDataTime: number
+	tcpHeartbeatCheckId: NodeJS.Timeout | null
+	tcpActiveHeartbeatId: NodeJS.Timeout | null
+	frameVersion: string | null
+	frameName: string | null
+	frameBuildDate: string | null
+
+	// Macro catalog state
+	macroCatalog: Map<number, MacroCatalogEntry>
+	macroCatalogReady: boolean
+	lastPublishedMacroCatalog: string | null
+	macroCatalogBulkTimerId: NodeJS.Timeout | null
+	macroCatalogSubscribed: boolean
+	macroCatalogDataSeen: boolean
+	macroCatalogRetryTimerId: NodeJS.Timeout | null
+	macroCatalogSubscribeAttempts: number
+
+	// Macro run-state
+	macroStatus: Map<number, number>
+	lastPlayedMacro: number | null
+	runSeq: number
+	macroStatusSubscribed: boolean
+
+	emitter: EventEmitter
+
+	// Configuration
+	mainClientPort: number
+	listenerClientPort: number
+	initialServerPort: number
+	portAnnounceServerPort: number
+	heartbeatIntervalMs: number
+	handshakeTimeoutMs: number
+	MAX_MISSED_HEARTBEATS: number
+	MAX_TRACKED_IDS: number
+	macroSendDelayMs: number
+	MAX_MACRO_SUBSCRIBE_ATTEMPTS: number
+	MACRO_SUBSCRIBE_RETRY_MS: number
+
+	// Payloads: assigned by setupPayloads()/setupSuiteCommands(), which the constructor calls.
+	payloadPacket1!: Buffer
+	expectedPayloadPacket2!: Buffer
+	payloadPacket3!: Buffer
+	expectedPayloadPacket4!: Buffer
+	payloadPacket5!: Buffer
+	expectedPayloadPacket6!: Buffer
+	expectedPayloadPacket7!: Buffer
+	payloadPacket8!: Buffer
+	expectedPayloadPacket10!: Buffer
+	payloadPacket12!: Buffer
+	expectedPayloadPacket13!: Buffer
+	payloadPacket14!: Buffer
+	expectedPayloadPacket15!: Buffer
+	payloadPacket16Base!: Buffer
+	payloadPacket16Client!: Buffer
+	expectedPayloadPacket17!: Buffer
+	clientHeartbeatPayload!: Buffer
+	expectedServerHeartbeatResponse!: Buffer
+	suiteCommands!: Record<string, Buffer[]>
+
+	constructor(
+		connectionId: string,
+		targetHost: string,
+		suite: string,
+		customPorts?: ConnectionPorts | null,
+		suiteName?: string,
+		moduleVersion?: string,
+		buildDate?: string,
+	) {
 		this.connectionId = connectionId
 		this.targetHost = targetHost
 		this.suite = suite
@@ -43,7 +285,6 @@ class HandshakeConnection {
 		// State tracking
 		this.lastHeartbeatResponseTime = 0
 		this.missedHeartbeats = 0
-		this.initialHeartbeatSent = false
 		this.lastSentMacroId = null
 		this.macroQueue = []
 		this.isSendingMacro = false
@@ -57,16 +298,13 @@ class HandshakeConnection {
 		// AUX subscription state
 		this.auxState = new Map() // auxNum (1-96) -> currentSourceNum
 		this.subscribedAuxes = new Set() // Set of auxNum we've subscribed to
-		this.auxSubscriptionIds = new Map() // subscriptionId -> auxNum (not used yet, for future response tracking)
 		this.nextSubscriptionId = 0x0400 // Starting subscription ID range
 		this.subscriptionSequence = 0x0300 // Sequence counter for subscription packets
-		this.subscriptionDataPort = 0 // Port the frame uses to send subscription data to listener
 
 		// ME bus subscription state
 		this.keyerState = new Map() // Keyer source selections; separate from A-D bus state.
 		this.meState = new Map() // address byte -> currentSourceNum
 		this.subscribedMEs = new Set() // Tracking set (like subscribedAuxes)
-		this.meSubscriptionIds = new Map() // subscriptionId -> address byte
 
 		// Master E-MEM timeline scalar subscriptions
 		this.timelineState = { cursorTime: null, duration: null, pauseState: 0, runState: null, pausePoints: [] }
@@ -127,7 +365,6 @@ class HandshakeConnection {
 		this.initialServerPort = 5000
 		this.portAnnounceServerPort = 5001
 		this.heartbeatIntervalMs = 1000
-		this.heartbeatTimeoutMs = this.heartbeatIntervalMs * 2.5
 		this.handshakeTimeoutMs = 10000
 		this.MAX_MISSED_HEARTBEATS = 5
 		this.MAX_TRACKED_IDS = 50
@@ -140,7 +377,7 @@ class HandshakeConnection {
 		this.setupSuiteCommands()
 	}
 
-	setupPayloads() {
+	setupPayloads(): void {
 		// Handshake 1 payloads
 		this.payloadPacket1 = Buffer.from([0x00, 0x06, 0x00, 0x00])
 		this.expectedPayloadPacket2 = Buffer.from([0x00, 0x02, 0x00, 0x00])
@@ -186,7 +423,7 @@ class HandshakeConnection {
 		this.expectedServerHeartbeatResponse = Buffer.from([0x00, 0x02, 0x00, 0x00])
 	}
 
-	setupSuiteCommands() {
+	setupSuiteCommands(): void {
 		this.suiteCommands = {
 			suite1a: [
 				Buffer.from('0004017c000200060000000c0000001417960200010000070000000a', 'hex'),
@@ -207,10 +444,27 @@ class HandshakeConnection {
 		}
 	}
 
-	generateUniqueAuxId() {
+	// Accessors for paths whose callers guarantee the socket is open. A missing
+	// socket throws a TypeError, as the former direct null dereference did.
+	requireTcpSocket(): net.Socket {
+		if (!this.tcpSocket) throw new TypeError('TCP socket is not open')
+		return this.tcpSocket
+	}
+
+	requireMainClient(): dgram.Socket {
+		if (!this.mainClient) throw new TypeError('UDP main socket is not open')
+		return this.mainClient
+	}
+
+	requireListenerClient(): dgram.Socket {
+		if (!this.listenerClient) throw new TypeError('UDP listener socket is not open')
+		return this.listenerClient
+	}
+
+	generateUniqueAuxId(): number {
 		let attempts = 0
 		const maxAttempts = 100
-		let candidateId
+		let candidateId: number
 
 		do {
 			candidateId = crypto.randomInt(0, 65536)
@@ -224,7 +478,7 @@ class HandshakeConnection {
 		return candidateId
 	}
 
-	throwIfClosing() {
+	throwIfClosing(): void {
 		if (this.isClosing) {
 			const error = new Error('Connection startup cancelled')
 			error.name = 'AbortError'
@@ -233,7 +487,7 @@ class HandshakeConnection {
 	}
 
 	// Start the connection process - auto-detects TCP (V16+) or UDP (V14)
-	async start() {
+	async start(): Promise<() => void> {
 		this.throwIfClosing()
 
 		this.emitter.emit('status', 'CONNECTING', 'Detecting protocol...')
@@ -250,7 +504,10 @@ class HandshakeConnection {
 				}
 				// Auth failed — fall through to UDP
 			}
-		} catch (e) {}
+		} catch {
+			// Any TCP detection/auth failure (timeout, refused, reset) means "not a
+			// V16+ frame": fall back to UDP. Cancellation is re-checked just below.
+		}
 
 		this.throwIfClosing()
 		// Fall back to UDP (V14)
@@ -259,9 +516,9 @@ class HandshakeConnection {
 	}
 
 	// Try TCP connect to port 5000 with timeout, binding to suite listener port
-	tryTcpConnect() {
+	async tryTcpConnect(): Promise<boolean> {
 		this.throwIfClosing()
-		return new Promise((resolve, reject) => {
+		return new Promise<boolean>((resolve, reject) => {
 			const sock = new net.Socket()
 			this.tcpSocket = sock // Cleanup must own the socket during detection too.
 			let settled = false
@@ -312,15 +569,15 @@ class HandshakeConnection {
 	}
 
 	// TCP session frame wrapping
-	tcpWrap(payload) {
+	tcpWrap(payload: Buffer): Buffer {
 		const lenBuf = Buffer.alloc(2)
 		lenBuf.writeUInt16BE(payload.length, 0)
 		return Buffer.concat([SESSION_HEADER, lenBuf, payload, SESSION_TRAILER])
 	}
 
 	// TCP session frame unwrapping - returns (frames[], remainingBuffer)
-	tcpUnwrap(buffer) {
-		const frames = []
+	tcpUnwrap(buffer: Buffer): { frames: Buffer[]; remaining: Buffer } {
+		const frames: Buffer[] = []
 		while (true) {
 			const idx = buffer.indexOf(SESSION_HEADER)
 			if (idx === -1) {
@@ -353,7 +610,7 @@ class HandshakeConnection {
 
 	// Offset of the first header at or after `from` that starts a complete frame
 	// with a valid trailer, or -1.
-	tcpNextCompleteFrame(buffer, from) {
+	tcpNextCompleteFrame(buffer: Buffer, from: number): number {
 		let idx = buffer.indexOf(SESSION_HEADER, from)
 		while (idx !== -1 && buffer.length >= idx + 6) {
 			const frameEnd = idx + 6 + buffer.readUInt16BE(idx + 4) + 4
@@ -364,7 +621,7 @@ class HandshakeConnection {
 	}
 
 	// TCP authentication packet
-	tcpAuthPacket(seq, clientId = 0) {
+	tcpAuthPacket(seq: number, clientId = 0): Buffer {
 		const nameBytes = Buffer.from(`${this.clientName}\x00`, 'ascii')
 		const payload = Buffer.alloc(16 + nameBytes.length)
 		let off = 0
@@ -387,7 +644,7 @@ class HandshakeConnection {
 	// CPL SetParam — sendToFrame()-compatible (UDP DATA header + CPL body).
 	// sendToFrame() strips the 4-byte header for TCP and tcpWraps; sends as-is for UDP.
 	// outer_len = 8 + data.length,  inner_len = outer_len + 8,  type_flags: 0x0800=string 0x0300=uint16
-	buildSetParam(pid, typeFlags, did, data) {
+	buildSetParam(pid: number, typeFlags: number, did: number, data: Buffer): Buffer {
 		const outerLen = 8 + data.length
 		const innerLen = outerLen + 8
 		const frame = Buffer.alloc(24 + data.length)
@@ -413,14 +670,14 @@ class HandshakeConnection {
 		data.copy(frame, off)
 		return frame
 	}
-	buildSetFrame(pid, typeFlags, did, data) {
+	buildSetFrame(pid: number, typeFlags: number, did: number, data: Buffer): Buffer {
 		return this.buildSetParam(pid, typeFlags, did, data)
 	}
 
 	// CPL SetEvent — sendToFrame()-compatible. outer = 8 + data.length, inner = outer + 7.
 	// msgId override exists for the macro path: createMacroPayload() MUST keep the 0x03xx
 	// message-ID page or the 4-byte UDP MACRO_ACK match (0002 03 id) breaks.
-	buildSetEvent(eid, did, data = Buffer.alloc(0), msgId = null) {
+	buildSetEvent(eid: number, did: number, data: Buffer = Buffer.alloc(0), msgId: number | null = null): Buffer {
 		const outerLen = 8 + data.length
 		const frame = Buffer.alloc(24 + data.length)
 		let off = 0
@@ -448,10 +705,10 @@ class HandshakeConnection {
 
 	// Announce module identity to Engineering > Panel Connections GUI after CONNECTED.
 	// Works on both TCP (V16+/V18) and UDP (V14) via sendToFrame().
-	announceIdentity() {
+	announceIdentity(): void {
 		if (this.isClosing) return
 		const now = new Date()
-		const pad = (n) => String(n).padStart(2, '0')
+		const pad = (n: number) => String(n).padStart(2, '0')
 		const timeStr = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
 		const versionStr = `V${this.moduleVersion}`
 
@@ -466,7 +723,7 @@ class HandshakeConnection {
 	}
 
 	// TCP subscribe command (cmd 0x0008)
-	tcpSubscribe(subId, flags, sigAndParams) {
+	tcpSubscribe(subId: number, flags: Buffer, sigAndParams: Buffer): Buffer {
 		const payload = Buffer.alloc(48)
 		let off = 0
 		payload.writeUInt16BE(0x0002, off)
@@ -487,14 +744,14 @@ class HandshakeConnection {
 	}
 
 	// Parse frame version, name, build date from raw data
-	parseFrameInfo(data) {
+	parseFrameInfo(data: Buffer): FrameInfo {
 		const ascii = Array.from(data)
 			.map((b) => (b >= 32 && b < 127 ? String.fromCharCode(b) : ' '))
 			.join('')
 
-		let version = null
-		let name = null
-		let buildDate = null
+		let version: string | null = null
+		let name: string | null = null
+		let buildDate: string | null = null
 
 		// Frame software is V14, V18, V20…; year-style versions (V2026.0.9.5) are
 		// client identities the frame relays, such as this module's own announcement.
@@ -523,7 +780,7 @@ class HandshakeConnection {
 	}
 
 	// Start TCP path (V16+/V18). Returns cleanup closure on success, false on auth failure.
-	async startTcp() {
+	async startTcp(): Promise<(() => void) | false> {
 		this.throwIfClosing()
 		this.emitter.emit('status', 'CONNECTING', 'TCP Authentication...')
 
@@ -532,7 +789,7 @@ class HandshakeConnection {
 		await this.sleep(1000)
 
 		// Auth packet 1 (seq=1)
-		this.tcpSocket.write(this.tcpAuthPacket(0x0001))
+		this.requireTcpSocket().write(this.tcpAuthPacket(0x0001))
 
 		// Wait for a complete framed AUTH response (3s matches engine.py:1184-1185)
 		const authOk = await this.tcpWaitForFrame(3000)
@@ -543,18 +800,16 @@ class HandshakeConnection {
 			return false
 		}
 
-		// Parse assigned client ID (informational, not used in AUTH3)
-		if (this.tcpAuthPayload && this.tcpAuthPayload.length >= 16) {
-			const assignedId = this.tcpAuthPayload.readUInt16BE(14)
-		}
+		// The AUTH response carries an assigned client ID at offset 14; it is
+		// informational only (AUTH3 uses client ID 0), so it is not read.
 		this.tcpAuthPayload = null
 
 		// Install permanent error/close handlers AFTER auth succeeds
-		this.tcpSocket.on('error', (err) => {
+		this.requireTcpSocket().on('error', (err) => {
 			this.emitter.emit('status', 'ERROR', `TCP error: ${err.message}`)
 			this.cleanup()
 		})
-		this.tcpSocket.on('close', () => {
+		this.requireTcpSocket().on('close', () => {
 			if (!this.isClosing) {
 				this.emitter.emit('status', 'DISCONNECTED', 'TCP connection closed by frame')
 				this.cleanup()
@@ -564,7 +819,7 @@ class HandshakeConnection {
 		await this.sleep(500)
 
 		// Auth packet 3 (seq=3, client ID 0 — not the assigned ID)
-		this.tcpSocket.write(this.tcpAuthPacket(0x0003))
+		this.requireTcpSocket().write(this.tcpAuthPacket(0x0003))
 		await this.sleep(500)
 
 		// Drain auth3 response
@@ -573,7 +828,7 @@ class HandshakeConnection {
 		this.emitter.emit('status', 'CONNECTING', 'TCP Registration...')
 
 		// Registration 1: 0x11e5
-		this.tcpSocket.write(
+		this.requireTcpSocket().write(
 			this.tcpSubscribe(
 				0x0005,
 				Buffer.from([0x00, 0x00, 0x00, 0x03, 0x00, 0x01, 0x00, 0x02, 0x00, 0x00]),
@@ -583,7 +838,7 @@ class HandshakeConnection {
 		await this.sleep(100)
 
 		// Registration 2: 0x11a1
-		this.tcpSocket.write(
+		this.requireTcpSocket().write(
 			this.tcpSubscribe(
 				0x0002,
 				Buffer.from([0x00, 0x01, 0x00, 0x03, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00]),
@@ -593,7 +848,7 @@ class HandshakeConnection {
 		await this.sleep(100)
 
 		// Registration 3: 0x11a5
-		this.tcpSocket.write(
+		this.requireTcpSocket().write(
 			this.tcpSubscribe(
 				0x0002,
 				Buffer.from([0x00, 0x00, 0x00, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00]),
@@ -603,7 +858,7 @@ class HandshakeConnection {
 		await this.sleep(100)
 
 		// Registration 4: 0x11e5 re-reg
-		this.tcpSocket.write(
+		this.requireTcpSocket().write(
 			this.tcpSubscribe(
 				0x0005,
 				Buffer.from([0x00, 0x01, 0x00, 0x03, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00]),
@@ -614,7 +869,7 @@ class HandshakeConnection {
 
 		// Frame info subscriptions (sub_id 0x01fe, matching native GUI Wireshark capture)
 		// First subscription: data[0]=0x01, sig[7]=0x0f
-		this.tcpSocket.write(
+		this.requireTcpSocket().write(
 			this.tcpSubscribe(
 				0x01fe,
 				Buffer.from([0x00, 0x01, 0x00, 0x04, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00]),
@@ -623,7 +878,7 @@ class HandshakeConnection {
 		)
 		await this.sleep(100)
 		// Second subscription: data[0]=0x02, sig[7]=0x01
-		this.tcpSocket.write(
+		this.requireTcpSocket().write(
 			this.tcpSubscribe(
 				0x01fe,
 				Buffer.from([0x00, 0x02, 0x00, 0x04, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00]),
@@ -633,7 +888,7 @@ class HandshakeConnection {
 
 		// NOW attach the permanent data handler (after auth is complete, no double-buffering)
 		this.tcpBuffer = Buffer.alloc(0)
-		this.tcpSocket.on('data', (data) => this.handleTcpData(data))
+		this.requireTcpSocket().on('data', (data: Buffer) => this.handleTcpData(data))
 		this.lastTcpDataTime = Date.now()
 		this.mainHandshakeStage = 9 // Mark as connected (stage 9 = operational)
 		this.secondPhaseDynamicCommPort = this.initialServerPort // Show frame port (5000) on button
@@ -642,7 +897,7 @@ class HandshakeConnection {
 		// This keeps the connection alive and refreshes frame version data
 		this.tcpActiveHeartbeatId = setInterval(() => {
 			if (this.isClosing || !this.tcpSocket) {
-				clearInterval(this.tcpActiveHeartbeatId)
+				clearInterval(this.tcpActiveHeartbeatId ?? undefined)
 				return
 			}
 			try {
@@ -653,15 +908,16 @@ class HandshakeConnection {
 						Buffer.from([0x00, 0x08, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01]),
 					),
 				)
-			} catch (e) {
-				// Write failed - connection is dead
+			} catch {
+				// Write failed - connection is dead; the passive monitor below or the
+				// socket's own error/close handler performs the cleanup.
 			}
 		}, 8000)
 
 		// Passive TCP heartbeat monitoring: disconnect if no data for 30 seconds
 		this.tcpHeartbeatCheckId = setInterval(() => {
 			if (this.isClosing) {
-				clearInterval(this.tcpHeartbeatCheckId)
+				clearInterval(this.tcpHeartbeatCheckId ?? undefined)
 				return
 			}
 			const elapsed = Date.now() - this.lastTcpDataTime
@@ -702,7 +958,7 @@ class HandshakeConnection {
 	}
 
 	// Handle incoming TCP data
-	handleTcpData(data) {
+	handleTcpData(data: Buffer): void {
 		this.lastTcpDataTime = Date.now()
 		this.tcpBuffer = Buffer.concat([this.tcpBuffer, data])
 
@@ -745,16 +1001,16 @@ class HandshakeConnection {
 		}
 	}
 
-	tcpWaitForFrame(timeoutMs) {
+	async tcpWaitForFrame(timeoutMs: number): Promise<boolean> {
 		this.throwIfClosing()
 		const socket = this.tcpSocket
-		return new Promise((resolve) => {
+		return new Promise<boolean>((resolve) => {
 			let settled = false
-			let timer = null
-			let onData = null
-			let onFail = null
+			let timer: NodeJS.Timeout | null = null
+			let onData: ((chunk: Buffer) => void) | null = null
+			let onFail: (() => void) | null = null
 
-			const settle = (val) => {
+			const settle = (val: boolean) => {
 				if (settled) return
 				settled = true
 				if (timer) clearTimeout(timer)
@@ -781,20 +1037,23 @@ class HandshakeConnection {
 			tryExtract()
 			if (settled) return
 
-			onData = (chunk) => {
+			onData = (chunk: Buffer) => {
 				this.tcpBuffer = Buffer.concat([this.tcpBuffer, chunk])
 				tryExtract()
 			}
 			onFail = () => settle(false)
 			timer = setTimeout(() => settle(false), timeoutMs)
 
+			// Without a socket and no buffered frame the wait rejects (as the former
+			// null dereference did) instead of hanging until the timeout.
+			if (!socket) throw new TypeError('TCP socket is not open')
 			socket.on('data', onData)
 			socket.on('error', onFail)
 			socket.on('close', onFail)
 		})
 	}
 
-	abortTcpAttempt(reason) {
+	abortTcpAttempt(reason: string): void {
 		this.throwIfClosing()
 		this.emitter.emit('status', 'TCP_AUTH_FAILED', reason)
 		if (this.tcpSocket) {
@@ -809,13 +1068,13 @@ class HandshakeConnection {
 	}
 
 	// TCP suite selection
-	tcpSelectSuite() {
+	tcpSelectSuite(): void {
 		if (!this.suite || !this.suiteCommands[this.suite]) return
 
 		// Get the RDP payloads from the existing suite commands (strip 4-byte UDP header)
 		const cmds = this.suiteCommands[this.suite]
 		const rdp1 = cmds[0].slice(4)
-		this.tcpSocket.write(this.tcpWrap(rdp1))
+		this.requireTcpSocket().write(this.tcpWrap(rdp1))
 
 		if (cmds.length > 1) {
 			setTimeout(() => {
@@ -827,9 +1086,9 @@ class HandshakeConnection {
 		}
 	}
 
-	async sleep(ms) {
+	async sleep(ms: number): Promise<void> {
 		this.throwIfClosing()
-		await new Promise((resolve, reject) => {
+		await new Promise<void>((resolve, reject) => {
 			const signal = this.startupAbort.signal
 			const cancel = () => {
 				clearTimeout(timer)
@@ -846,7 +1105,7 @@ class HandshakeConnection {
 	}
 
 	// Subscribe to macro catalog (works on both TCP/V16+ and UDP/V14)
-	subscribeMacroCatalog() {
+	subscribeMacroCatalog(): CommandResult {
 		if (this.isClosing || this.mainHandshakeStage !== 9) {
 			return { success: false, message: 'Not connected.' }
 		}
@@ -872,7 +1131,7 @@ class HandshakeConnection {
 		return { success: true, message: `Macro catalog subscription sent (${this.protocol}).` }
 	}
 
-	sendMacroCatalogSubscribeTcp() {
+	sendMacroCatalogSubscribeTcp(): void {
 		if (!this.tcpSocket || this.isClosing) return
 
 		this.tcpSocket.write(
@@ -890,7 +1149,7 @@ class HandshakeConnection {
 	 * Send macro catalog subscription over UDP (V14).
 	 * Uses sub_id 0x020f with signature 0x0023 and params matching the V14 protocol.
 	 */
-	sendMacroCatalogSubscribeUdp() {
+	sendMacroCatalogSubscribeUdp(): void {
 		if (!this.mainClient || this.isClosing || this.secondPhaseDynamicCommPort === 0) return
 
 		const seqNum = this.subscriptionSequence++
@@ -930,21 +1189,21 @@ class HandshakeConnection {
 	 * macro catalog bulk data on the listener socket.
 	 * Discovered via Wireshark capture of working client (rows 59-83).
 	 */
-	sendUdpRegistrationSubscribes(callback) {
+	sendUdpRegistrationSubscribes(callback?: () => void): void {
 		if (!this.mainClient || this.isClosing || this.secondPhaseDynamicCommPort === 0) {
 			if (callback) callback()
 			return
 		}
 
 		// Helper: send a raw hex payload wrapped in a DATA header
-		const sendRawSub = (hexPayload) => {
+		const sendRawSub = (hexPayload: string) => {
 			const payload = Buffer.from(hexPayload, 'hex')
 			const seqNum = this.subscriptionSequence++
 			const header = Buffer.alloc(4)
 			header.writeUInt16BE(0x0004, 0)
 			header.writeUInt16BE(seqNum, 2)
 			const packet = Buffer.concat([header, payload])
-			this.mainClient.send(packet, this.secondPhaseDynamicCommPort, this.targetHost)
+			this.requireMainClient().send(packet, this.secondPhaseDynamicCommPort, this.targetHost)
 		}
 
 		// Build queue of all hex payloads to send
@@ -982,7 +1241,7 @@ class HandshakeConnection {
 		sendNext()
 	}
 
-	startMacroCatalogRetryLoop() {
+	startMacroCatalogRetryLoop(): void {
 		this.stopMacroCatalogRetryLoop()
 		this.macroCatalogRetryTimerId = setInterval(() => {
 			if (this.isClosing || !this.macroCatalogSubscribed || this.macroCatalogDataSeen) {
@@ -1006,7 +1265,7 @@ class HandshakeConnection {
 		}, this.MACRO_SUBSCRIBE_RETRY_MS)
 	}
 
-	stopMacroCatalogRetryLoop() {
+	stopMacroCatalogRetryLoop(): void {
 		if (this.macroCatalogRetryTimerId) {
 			clearInterval(this.macroCatalogRetryTimerId)
 			this.macroCatalogRetryTimerId = null
@@ -1015,7 +1274,7 @@ class HandshakeConnection {
 
 	// --- Macro status subscription (sub_id 0x0234, sig 0x2F, list-0, DID 0x77000000) ---
 
-	subscribeMacroStatus() {
+	subscribeMacroStatus(): void {
 		if (this.isClosing || this.mainHandshakeStage !== 9) return
 		if (this.macroStatusSubscribed) return
 
@@ -1032,7 +1291,7 @@ class HandshakeConnection {
 		this.emitter.emit('status', 'MACRO_STATUS_SUBSCRIBED', `${this.protocol} sub_id 0x0234`)
 	}
 
-	sendMacroStatusSubscribeTcp() {
+	sendMacroStatusSubscribeTcp(): void {
 		if (!this.tcpSocket || this.isClosing) return
 		this.tcpSocket.write(
 			this.tcpSubscribe(
@@ -1043,7 +1302,7 @@ class HandshakeConnection {
 		)
 	}
 
-	sendMacroStatusSubscribeUdp() {
+	sendMacroStatusSubscribeUdp(): void {
 		if (!this.mainClient || this.isClosing || this.secondPhaseDynamicCommPort === 0) return
 		const seqNum = this.subscriptionSequence++
 		const packet = Buffer.alloc(52)
@@ -1073,11 +1332,11 @@ class HandshakeConnection {
 	//   0=Stop 1=Play 2=Record 3=Load 4=Save 5=StopSave 6=StopPlay 7=Pause 8=Append
 	static MS_ALL = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8])
 	static MS_ACTIVE = new Set([1, 7])
-	static STATUS_RANK = { 7: 3, 1: 2, 6: 2, 3: 1, 2: 1 }
+	static STATUS_RANK: Readonly<Partial<Record<number, number>>> = { 7: 3, 1: 2, 6: 2, 3: 1, 2: 1 }
 
 	// OID linked-list form (V18.0.2): walk block headers, structured — can't false-match.
-	statusEntriesOid(msg, pb, payLen) {
-		const out = []
+	statusEntriesOid(msg: Buffer, pb: number, payLen: number): MacroStatusEntry[] {
+		const out: MacroStatusEntry[] = []
 		const n = pb + payLen
 		let pos = pb + 16 // skip 16-byte sub-header
 		while (pos + 12 <= n) {
@@ -1101,8 +1360,8 @@ class HandshakeConnection {
 	}
 
 	// Legacy marker form: scan for 00 [01|02] 00 0e pattern. Fallback when OID yields nothing.
-	statusEntriesMarker(msg, pb, payLen) {
-		const out = []
+	statusEntriesMarker(msg: Buffer, pb: number, payLen: number): MacroStatusEntry[] {
+		const out: MacroStatusEntry[] = []
 		const end = pb + payLen
 		for (let j = pb; j + 15 <= end; j++) {
 			if (
@@ -1123,9 +1382,9 @@ class HandshakeConnection {
 	}
 
 	// Shared post-processing: priority merge, active-state update, play detection.
-	applyStatusEntries(entries) {
-		const seen = new Map()
-		for (const { index, macroNum, status } of entries) {
+	applyStatusEntries(entries: MacroStatusEntry[]): void {
+		const seen = new Map<number, number>()
+		for (const { macroNum, status } of entries) {
 			const prev = seen.get(macroNum)
 			if (
 				prev === undefined ||
@@ -1168,7 +1427,7 @@ class HandshakeConnection {
 		}
 	}
 
-	mapsEqual(a, b) {
+	mapsEqual<K, V>(a: Map<K, V>, b: Map<K, V>): boolean {
 		if (a.size !== b.size) return false
 		for (const [k, v] of a) {
 			if (b.get(k) !== v) return false
@@ -1177,14 +1436,14 @@ class HandshakeConnection {
 	}
 
 	// Main entry point: OID first (structured, can't false-match), marker fallback.
-	parseMacroStatusData(msg, pb, payLen) {
+	parseMacroStatusData(msg: Buffer, pb: number, payLen: number): void {
 		let entries = this.statusEntriesOid(msg, pb, payLen)
 		if (!entries.length) entries = this.statusEntriesMarker(msg, pb, payLen)
 		if (!entries.length) return
 		this.applyStatusEntries(entries)
 	}
 
-	getMacroRunState() {
+	getMacroRunState(): MacroRunState {
 		return {
 			macroStatus: Object.fromEntries(this.macroStatus),
 			lastPlayedMacro: this.lastPlayedMacro,
@@ -1192,7 +1451,7 @@ class HandshakeConnection {
 		}
 	}
 
-	getMacroStatusForMacro(macroNum) {
+	getMacroStatusForMacro(macroNum: number): number | null {
 		return this.macroStatus.get(macroNum) || null
 	}
 
@@ -1201,7 +1460,7 @@ class HandshakeConnection {
 	 * Source names are subscribed FIRST so they're cached before AUX/ME data arrives.
 	 * Works on both TCP and UDP via sendToFrame().
 	 */
-	subscribeToSourceNames() {
+	subscribeToSourceNames(): CommandResult {
 		if (this.isClosing || this.mainHandshakeStage !== 9) {
 			return { success: false, message: 'Not connected.' }
 		}
@@ -1211,7 +1470,7 @@ class HandshakeConnection {
 
 		// Build a 52-byte source name subscription packet.
 		// Source name subs put the signature at bytes 32-33 (not a sub_id).
-		const buildSourceNamePacket = (sig, flags6, params8) => {
+		const buildSourceNamePacket = (sig: number, flags6: number[], params8: number[]) => {
 			const seqNum = this.subscriptionSequence++
 			const packet = Buffer.alloc(52)
 			let off = 0
@@ -1267,7 +1526,7 @@ class HandshakeConnection {
 	}
 
 	// Parse macro catalog data from a TCP payload
-	parseMacroCatalogData(payload) {
+	parseMacroCatalogData(payload: Buffer): number {
 		// OID range for macro slots: base = 0x1A8E. The slot OID's high 2 bytes are always
 		// 0x0000, so the real ceiling is 0xFFFF; the old stride-1 assumption (0x1E75)
 		// truncated V17/V18 catalogs mid-dump. macroNum 1..999 + dataLen guards already
@@ -1345,7 +1604,7 @@ class HandshakeConnection {
 	// V14 UDP macro catalog parser (the V14 subscription reply path).
 	// Each entry: prevOID(4) + nextOID(4) + field_count(2) + data_len(2)
 	//             + data: [macro_index(2) + name1\0 + name2\0 + name3\0]
-	parseMacroCatalogDataV14(msg, pb, payLen) {
+	parseMacroCatalogDataV14(msg: Buffer, pb: number, payLen: number): number {
 		let found = 0
 		// Sub-header at pb is 16 bytes: sub_id(2) + flags(6) + sig(2) + params(2) + pad(4)
 		// First packet may have a 12-byte zero sentinel entry after this which the loop skips naturally
@@ -1393,7 +1652,7 @@ class HandshakeConnection {
 	}
 
 	// Reset bulk load timer - called each time macro data arrives
-	resetMacroCatalogBulkTimer() {
+	resetMacroCatalogBulkTimer(): void {
 		if (this.macroCatalogBulkTimerId) {
 			clearTimeout(this.macroCatalogBulkTimerId)
 		}
@@ -1423,49 +1682,49 @@ class HandshakeConnection {
 	}
 
 	// Get macro name (OLED) by number
-	getMacroName(macroNum) {
+	getMacroName(macroNum: number): string | null {
 		const entry = this.macroCatalog.get(macroNum)
 		if (!entry) return null
 		return entry.oled || entry.panel || entry.comment || null
 	}
 
 	// Get full macro catalog as plain object
-	getMacroCatalog() {
+	getMacroCatalog(): Record<number, MacroCatalogEntry> {
 		return Object.fromEntries(this.macroCatalog)
 	}
 
 	// Start UDP path (V14) - original handshake process
-	async startUdp() {
+	async startUdp(): Promise<() => void> {
 		this.throwIfClosing()
 		this.mainClient = dgram.createSocket('udp4')
 		this.listenerClient = dgram.createSocket('udp4')
 
-		return new Promise((resolve, reject) => {
+		return new Promise<() => void>((resolve, reject) => {
 			let settled = false
 			const signal = this.startupAbort.signal
-			const finish = (error) => {
+			const finish = (error?: Error | null) => {
 				if (settled) return
 				settled = true
 				signal.removeEventListener('abort', cancel)
-				this.mainClient.removeListener('error', onError)
-				this.listenerClient.removeListener('error', onError)
+				this.requireMainClient().removeListener('error', onError)
+				this.requireListenerClient().removeListener('error', onError)
 				if (error) reject(error)
 				else resolve(() => this.cleanup())
 			}
 			const cancel = () => finish(new Error('Connection startup cancelled'))
-			const onError = (error) => finish(error)
+			const onError = (error: Error) => finish(error)
 			signal.addEventListener('abort', cancel, { once: true })
-			this.mainClient.once('error', onError)
-			this.listenerClient.once('error', onError)
+			this.requireMainClient().once('error', onError)
+			this.requireListenerClient().once('error', onError)
 			this.setupMainClientHandlers()
 			this.setupListenerClientHandlers()
 
-			this.mainClient.bind(this.mainClientPort, () => {
+			this.requireMainClient().bind(this.mainClientPort, () => {
 				if (this.isClosing) {
 					this.cleanup()
 					return
 				}
-				this.listenerClient.bind(this.listenerClientPort, () => {
+				this.requireListenerClient().bind(this.listenerClientPort, () => {
 					if (this.isClosing) {
 						this.cleanup()
 						return
@@ -1475,7 +1734,7 @@ class HandshakeConnection {
 						this.cleanup()
 						return
 					}
-					this.mainClient.send(this.payloadPacket1, this.initialServerPort, this.targetHost, (err) => {
+					this.requireMainClient().send(this.payloadPacket1, this.initialServerPort, this.targetHost, (err) => {
 						if (this.isClosing) {
 							this.cleanup()
 							return
@@ -1496,29 +1755,29 @@ class HandshakeConnection {
 		})
 	}
 
-	setupMainClientHandlers() {
-		this.mainClient.on('error', (err) => {
+	setupMainClientHandlers(): void {
+		this.requireMainClient().on('error', (err) => {
 			this.emitter.emit('status', 'ERROR', `Main Client error: ${err.message}`)
 			this.cleanup()
 		})
 
-		this.mainClient.on('message', (msg, rinfo) => {
+		this.requireMainClient().on('message', (msg, rinfo) => {
 			this.handleMainClientMessage(msg, rinfo)
 		})
 	}
 
-	setupListenerClientHandlers() {
-		this.listenerClient.on('error', (err) => {
+	setupListenerClientHandlers(): void {
+		this.requireListenerClient().on('error', (err) => {
 			this.emitter.emit('status', 'ERROR', `Listener Client error: ${err.message}`)
 			this.cleanup()
 		})
 
-		this.listenerClient.on('message', (msg, rinfo) => {
+		this.requireListenerClient().on('message', (msg, rinfo) => {
 			this.handleListenerClientMessage(msg, rinfo)
 		})
 	}
 
-	handleMainClientMessage(msg, rinfo) {
+	handleMainClientMessage(msg: Buffer, rinfo: dgram.RemoteInfo): void {
 		// Handshake 1
 		if (
 			this.mainHandshakeStage === 2 &&
@@ -1530,14 +1789,14 @@ class HandshakeConnection {
 				this.packet1RetryIntervalId = null
 			}
 			this.mainHandshakeStage = 3
-			this.mainClient.send(this.payloadPacket3, this.initialServerPort, this.targetHost)
+			this.requireMainClient().send(this.payloadPacket3, this.initialServerPort, this.targetHost)
 		} else if (
 			this.mainHandshakeStage === 3 &&
 			rinfo.port === this.initialServerPort &&
 			msg.equals(this.expectedPayloadPacket4)
 		) {
 			this.mainHandshakeStage = 4
-			this.mainClient.send(this.payloadPacket5, this.initialServerPort, this.targetHost)
+			this.requireMainClient().send(this.payloadPacket5, this.initialServerPort, this.targetHost)
 		} else if (
 			this.mainHandshakeStage === 4 &&
 			rinfo.port === this.initialServerPort &&
@@ -1546,7 +1805,7 @@ class HandshakeConnection {
 			this.mainHandshakeStage = 5
 			if (this.announcedTargetPort > 0) {
 				this.mainHandshakeStage = 6
-				this.mainClient.send(this.payloadPacket12, this.announcedTargetPort, this.targetHost)
+				this.requireMainClient().send(this.payloadPacket12, this.announcedTargetPort, this.targetHost)
 			}
 		}
 		// Handshake 2
@@ -1557,7 +1816,7 @@ class HandshakeConnection {
 		) {
 			this.secondPhaseDynamicCommPort = rinfo.port
 			this.mainHandshakeStage = 7
-			this.mainClient.send(this.payloadPacket14, this.secondPhaseDynamicCommPort, this.targetHost)
+			this.requireMainClient().send(this.payloadPacket14, this.secondPhaseDynamicCommPort, this.targetHost)
 		} else if (
 			this.mainHandshakeStage === 7 &&
 			rinfo.port === this.secondPhaseDynamicCommPort &&
@@ -1572,7 +1831,7 @@ class HandshakeConnection {
 				Buffer.alloc(2),
 				this.payloadPacket16Client,
 			])
-			this.mainClient.send(payloadPacket16, this.secondPhaseDynamicCommPort, this.targetHost)
+			this.requireMainClient().send(payloadPacket16, this.secondPhaseDynamicCommPort, this.targetHost)
 		} else if (
 			this.mainHandshakeStage === 8 &&
 			rinfo.port === this.secondPhaseDynamicCommPort &&
@@ -1619,7 +1878,7 @@ class HandshakeConnection {
 			if (msg.length >= 4) {
 				const pktType = msg.readUInt16BE(0)
 				if (pktType === 0x0001 || pktType === 0x0004 || pktType === 0x0006) {
-					this.mainClient.send(this.buildAck(msg), rinfo.port, rinfo.address)
+					this.requireMainClient().send(this.buildAck(msg), rinfo.port, rinfo.address)
 				}
 			}
 
@@ -1671,20 +1930,20 @@ class HandshakeConnection {
 		}
 	}
 
-	handleListenerClientMessage(msg, rinfo) {
+	handleListenerClientMessage(msg: Buffer, rinfo: dgram.RemoteInfo): void {
 		if (rinfo.port === this.portAnnounceServerPort) {
 			// Port announcement handshake (from port 5001)
 			if (msg.equals(this.expectedPayloadPacket7)) {
-				this.listenerClient.send(this.payloadPacket8, rinfo.port, rinfo.address)
+				this.requireListenerClient().send(this.payloadPacket8, rinfo.port, rinfo.address)
 			} else if (msg.length >= 20) {
 				const newlyAnnouncedPort = msg.readUInt16BE(18)
 				if (newlyAnnouncedPort > 0 && newlyAnnouncedPort < 65536) {
 					this.announcedTargetPort = newlyAnnouncedPort
-					this.listenerClient.send(this.expectedPayloadPacket10, rinfo.port, rinfo.address, (err) => {
+					this.requireListenerClient().send(this.expectedPayloadPacket10, rinfo.port, rinfo.address, (err) => {
 						if (!err) {
 							if (this.mainHandshakeStage === 5) {
 								this.mainHandshakeStage = 6
-								this.mainClient.send(this.payloadPacket12, this.announcedTargetPort, this.targetHost)
+								this.requireMainClient().send(this.payloadPacket12, this.announcedTargetPort, this.targetHost)
 							}
 							// NOTE: Do NOT close the listener socket here.
 							// The frame sends subscription data back on the listener port
@@ -1698,14 +1957,13 @@ class HandshakeConnection {
 			if (msg.length === 4 && msg.equals(this.expectedPayloadPacket7)) {
 				// Channel-establish (00010000) — response is 00020000 which is byte-identical
 				// to an ACK of seq 0. No behavior change from the type-gated rule below.
-				this.subscriptionDataPort = rinfo.port
-				this.listenerClient.send(this.payloadPacket8, rinfo.port, rinfo.address)
+				this.requireListenerClient().send(this.payloadPacket8, rinfo.port, rinfo.address)
 				this.emitter.emit('status', 'AUX_DATA_CHANNEL', `Subscription data channel established on port ${rinfo.port}`)
 			} else if (msg.length >= 4) {
 				// ACK inbound data/control packets by type (matches engine.py listener ACK rule).
 				const pktType = msg.readUInt16BE(0)
 				if (pktType === 0x0001 || pktType === 0x0004 || pktType === 0x0006) {
-					this.listenerClient.send(this.buildAck(msg), rinfo.port, rinfo.address)
+					this.requireListenerClient().send(this.buildAck(msg), rinfo.port, rinfo.address)
 				}
 
 				if (msg.length > 4) {
@@ -1728,7 +1986,7 @@ class HandshakeConnection {
 		}
 	}
 
-	sendSuiteCommand() {
+	sendSuiteCommand(): void {
 		if (this.suite && this.suiteCommands[this.suite]) {
 			if (this.protocol === 'tcp') {
 				this.tcpSelectSuite()
@@ -1747,7 +2005,7 @@ class HandshakeConnection {
 	}
 
 	// Send frame info subscription over UDP (sub_id 0x01fd, matching Python reference)
-	udpSubscribeFrameInfo() {
+	udpSubscribeFrameInfo(): void {
 		if (!this.mainClient || this.isClosing || this.secondPhaseDynamicCommPort === 0) return
 		this.udpMsgCounter = (this.udpMsgCounter || 0) + 1
 		const pkt = Buffer.alloc(52)
@@ -1778,7 +2036,7 @@ class HandshakeConnection {
 		this.mainClient.send(pkt, this.secondPhaseDynamicCommPort, this.targetHost)
 	}
 
-	startHeartbeat() {
+	startHeartbeat(): void {
 		this.lastHeartbeatResponseTime = 0
 		this.missedHeartbeats = 0
 
@@ -1791,25 +2049,25 @@ class HandshakeConnection {
 					this.cleanup()
 					return
 				}
-				this.mainClient.send(this.clientHeartbeatPayload, this.secondPhaseDynamicCommPort, this.targetHost)
+				this.requireMainClient().send(this.clientHeartbeatPayload, this.secondPhaseDynamicCommPort, this.targetHost)
 			} else {
-				clearInterval(this.heartbeatIntervalId)
+				clearInterval(this.heartbeatIntervalId ?? undefined)
 			}
 		}, this.heartbeatIntervalMs)
 	}
 
-	startPacket1RetryTimer() {
+	startPacket1RetryTimer(): void {
 		this.packet1RetryIntervalId = setInterval(() => {
 			if (this.mainHandshakeStage === 2 && !this.isClosing) {
-				this.mainClient.send(this.payloadPacket1, this.initialServerPort, this.targetHost)
+				this.requireMainClient().send(this.payloadPacket1, this.initialServerPort, this.targetHost)
 			} else {
-				clearInterval(this.packet1RetryIntervalId)
+				clearInterval(this.packet1RetryIntervalId ?? undefined)
 				this.packet1RetryIntervalId = null
 			}
 		}, 1000)
 	}
 
-	startHandshakeTimeout() {
+	startHandshakeTimeout(): void {
 		if (this.handshakeOverallTimeoutId) clearTimeout(this.handshakeOverallTimeoutId)
 		this.handshakeOverallTimeoutId = setTimeout(() => {
 			this.emitter.emit('status', 'HANDSHAKE_TIMEOUT_ERROR', "Couldn't connect (timeout)")
@@ -1817,7 +2075,7 @@ class HandshakeConnection {
 		}, this.handshakeTimeoutMs)
 	}
 
-	cleanup() {
+	cleanup(): void {
 		const alreadyClosing = this.isClosing
 		this.isClosing = true
 		this.startupAbort.abort()
@@ -1832,6 +2090,7 @@ class HandshakeConnection {
 		this.macroCatalogDataSeen = false
 		this.macroCatalogSubscribeAttempts = 0
 		if (this.macroCatalogBulkTimerId) clearTimeout(this.macroCatalogBulkTimerId)
+		this.macroCatalogBulkTimerId = null
 		this.stopMacroCatalogRetryLoop()
 		this.macroStatus.clear()
 		this.lastPlayedMacro = null
@@ -1868,22 +2127,22 @@ class HandshakeConnection {
 				this.tcpSocket.destroy()
 				this.tcpSocket = null
 			}
-		} catch (e) {
-			/* Ignore */
+		} catch {
+			// destroy() on an already-destroyed socket is harmless; cleanup must not throw.
 		}
 
 		// Also close sockets still binding; repeated cleanup must remain safe.
 		for (const socket of [this.mainClient, this.listenerClient]) {
 			try {
 				socket?.close()
-			} catch (e) {
+			} catch {
 				/* Already closed or never bound. */
 			}
 		}
 	}
 
 	// Build a 4-byte ACK: 0x0002 + echoed sequence bytes [2..3] from the inbound packet.
-	buildAck(msg) {
+	buildAck(msg: Buffer): Buffer {
 		const ack = Buffer.alloc(4)
 		ack.writeUInt16BE(0x0002, 0)
 		msg.copy(ack, 2, 2, 4)
@@ -1891,7 +2150,7 @@ class HandshakeConnection {
 	}
 
 	// Protocol-aware send: strips UDP DATA header for TCP, wraps in session framing
-	sendToFrame(buffer, callback) {
+	sendToFrame(buffer: Buffer, callback?: SendCallback): void {
 		if (this.protocol === 'tcp') {
 			if (!this.tcpSocket || this.isClosing) {
 				if (callback) callback(new Error('TCP socket not available'))
@@ -1909,13 +2168,14 @@ class HandshakeConnection {
 			try {
 				this.mainClient.send(buffer, this.secondPhaseDynamicCommPort, this.targetHost, callback)
 			} catch (err) {
-				if (callback) callback(err)
+				// dgram throws Error instances (e.g. ERR_SOCKET_DGRAM_NOT_RUNNING).
+				if (callback) callback(err instanceof Error ? err : new Error(String(err)))
 			}
 		}
 	}
 
 	// Command methods
-	sendMacro(macroNum) {
+	sendMacro(macroNum: number): CommandResult {
 		if (this.isClosing || this.mainHandshakeStage !== 9) {
 			return { success: false, message: 'Not connected.' }
 		}
@@ -1944,7 +2204,7 @@ class HandshakeConnection {
 		return { success: true, message: `Macro ${macroNum} ${verb} command sent.` }
 	}
 
-	sendMacroStop(macroNum) {
+	sendMacroStop(macroNum: number): CommandResult {
 		if (this.isClosing || this.mainHandshakeStage !== 9) {
 			return { success: false, message: 'Not connected.' }
 		}
@@ -1958,7 +2218,7 @@ class HandshakeConnection {
 		return { success: true, message: `Macro ${macroNum} Stop command sent.` }
 	}
 
-	sendMacroStopAll() {
+	sendMacroStopAll(): CommandResult {
 		if (this.isClosing || this.mainHandshakeStage !== 9) {
 			return { success: false, message: 'Not connected.' }
 		}
@@ -1985,9 +2245,9 @@ class HandshakeConnection {
 		return { success: true, message: 'Macro Stop-All command sent.' }
 	}
 
-	generateUniqueId() {
+	generateUniqueId(): number {
 		let attempts = 0
-		let candidateId
+		let candidateId: number
 
 		do {
 			candidateId = this.nextMacroId
@@ -1996,7 +2256,7 @@ class HandshakeConnection {
 			attempts++
 			if (attempts > 256) {
 				if (this.recentlyUsedIds.length > 0) {
-					candidateId = this.recentlyUsedIds.shift()
+					candidateId = this.recentlyUsedIds.shift() ?? candidateId
 				}
 				break
 			}
@@ -2011,20 +2271,22 @@ class HandshakeConnection {
 		return candidateId
 	}
 
-	createMacroPayload(macroNumber, macroIdNum, eid = 0x0002) {
+	createMacroPayload(macroNumber: number, macroIdNum: number, eid = 0x0002): Buffer {
 		const data = Buffer.alloc(4)
 		data.writeUInt16BE(macroNumber - 1, 0)
 		// data[2..3] = 0x0000 (runSource = 0, live-verified)
 		return this.buildSetEvent(eid, 0x77000000, data, 0x0300 | macroIdNum)
 	}
 
-	processMacroQueue() {
+	processMacroQueue(): void {
 		if (this.isSendingMacro || this.macroQueue.length === 0 || this.isClosing || this.mainHandshakeStage !== 9) {
 			return
 		}
 
+		const next = this.macroQueue.shift()
+		if (!next) return // Unreachable: the queue was checked non-empty above.
 		this.isSendingMacro = true
-		const { macroNum, macroPayload, macroIdNum, eid } = this.macroQueue.shift()
+		const { macroNum, macroPayload, macroIdNum, eid } = next
 
 		this.lastSentMacroId = macroIdNum
 
@@ -2052,7 +2314,7 @@ class HandshakeConnection {
 	 * Continue: optimistically drop from active map so a stale Paused entry
 	 *           can't wedge the button into sending a dead Continue.
 	 */
-	afterMacroFire(macroNum, eid) {
+	afterMacroFire(macroNum: number, eid: number): void {
 		let changed = false
 
 		if (eid === 0x0002) {
@@ -2081,7 +2343,7 @@ class HandshakeConnection {
 		}
 	}
 
-	sendAuxRoute(auxNum, sourceNum, transitionType = 'cut') {
+	sendAuxRoute(auxNum: number, sourceNum: number, transitionType = 'cut'): CommandResult {
 		if (this.isClosing || this.mainHandshakeStage !== 9) {
 			return { success: false, message: 'Not connected.' }
 		}
@@ -2098,7 +2360,7 @@ class HandshakeConnection {
 
 		try {
 			const auxIndex = auxNum - 1
-			let transByte
+			let transByte: number
 			switch (transitionType) {
 				case 'mix':
 					transByte = 0x01
@@ -2136,11 +2398,11 @@ class HandshakeConnection {
 
 			return { success: true, message: `Routing Aux ${auxNum} to Source ${sourceNum} (${transitionType})` }
 		} catch (error) {
-			return { success: false, message: `Error creating command: ${error.message}` }
+			return { success: false, message: `Error creating command: ${errorMessage(error)}` }
 		}
 	}
 
-	sendImageStore(outputNum, imageNum) {
+	sendImageStore(outputNum: number, imageNum: number): CommandResult {
 		if (this.isClosing || this.mainHandshakeStage !== 9) {
 			return { success: false, message: 'Not connected.' }
 		}
@@ -2172,11 +2434,11 @@ class HandshakeConnection {
 
 			return { success: true, message: `Setting Output ${outputNum} to Image ${imageNum}` }
 		} catch (error) {
-			return { success: false, message: `Error creating command: ${error.message}` }
+			return { success: false, message: `Error creating command: ${errorMessage(error)}` }
 		}
 	}
 
-	sendImageStoreInput(inputNum) {
+	sendImageStoreInput(inputNum: number): CommandResult {
 		if (this.isClosing || this.mainHandshakeStage !== 9) {
 			return { success: false, message: 'Not connected.' }
 		}
@@ -2200,11 +2462,11 @@ class HandshakeConnection {
 
 			return { success: true, message: `Setting Image Store input to ${inputNum}` }
 		} catch (error) {
-			return { success: false, message: `Error creating command: ${error.message}` }
+			return { success: false, message: `Error creating command: ${errorMessage(error)}` }
 		}
 	}
 
-	sendEMem(eMemNum) {
+	sendEMem(eMemNum: number): CommandResult {
 		if (this.isClosing || this.mainHandshakeStage !== 9) {
 			return { success: false, message: 'Not connected.' }
 		}
@@ -2228,11 +2490,11 @@ class HandshakeConnection {
 
 			return { success: true, message: `EMEM ${eMemNum} sent` }
 		} catch (error) {
-			return { success: false, message: `Error creating command: ${error.message}` }
+			return { success: false, message: `Error creating command: ${errorMessage(error)}` }
 		}
 	}
 
-	sendRawCommand(hexCommand) {
+	sendRawCommand(hexCommand: string): CommandResult {
 		if (this.isClosing || this.mainHandshakeStage !== 9) {
 			return { success: false, message: 'Not connected.' }
 		}
@@ -2269,11 +2531,11 @@ class HandshakeConnection {
 
 			return { success: true, message: `Raw command sent` }
 		} catch (error) {
-			return { success: false, message: `Error creating command: ${error.message}` }
+			return { success: false, message: `Error creating command: ${errorMessage(error)}` }
 		}
 	}
 
-	sendPanelMem(panelMemNum) {
+	sendPanelMem(panelMemNum: number): CommandResult {
 		if (this.isClosing || this.mainHandshakeStage !== 9) {
 			return { success: false, message: 'Not connected.' }
 		}
@@ -2297,11 +2559,11 @@ class HandshakeConnection {
 
 			return { success: true, message: `Panel Memory ${panelMemNum} sent` }
 		} catch (error) {
-			return { success: false, message: `Error creating command: ${error.message}` }
+			return { success: false, message: `Error creating command: ${errorMessage(error)}` }
 		}
 	}
 
-	sendCrosspoint(pid, did, sourceNum) {
+	sendCrosspoint(pid: number, did: number, sourceNum: number): CommandResult {
 		if (this.isClosing || this.mainHandshakeStage !== 9) {
 			return { success: false, message: 'Not connected.' }
 		}
@@ -2346,11 +2608,11 @@ class HandshakeConnection {
 			})
 			return { success: true, message: `Crosspoint sent` }
 		} catch (error) {
-			return { success: false, message: `Error creating command: ${error.message}` }
+			return { success: false, message: `Error creating command: ${errorMessage(error)}` }
 		}
 	}
 
-	sendTransitionEvent(eid, did) {
+	sendTransitionEvent(eid: number, did: number): CommandResult {
 		if (this.isClosing || this.mainHandshakeStage !== 9) {
 			return { success: false, message: 'Not connected.' }
 		}
@@ -2371,15 +2633,25 @@ class HandshakeConnection {
 			})
 			return { success: true, message: `Transition event sent` }
 		} catch (error) {
-			return { success: false, message: `Error creating command: ${error.message}` }
+			return { success: false, message: `Error creating command: ${errorMessage(error)}` }
 		}
 	}
 
-	sendTimelineEvent(eid, did, data) {
+	sendTimelineEvent(eid: number, did: number, data: number[]): CommandResult {
 		if (this.isClosing || this.mainHandshakeStage !== 9) {
 			return { success: false, message: 'Not connected.' }
 		}
-		if (!Number.isInteger(eid) || !Number.isInteger(did) || !Array.isArray(data)) {
+		const isByte = (value: number): boolean => Number.isInteger(value) && value >= 0 && value <= 0xff
+		if (
+			!Number.isInteger(eid) ||
+			eid < 0 ||
+			eid > 0xffff ||
+			!Number.isInteger(did) ||
+			did < 0 ||
+			did > 0xffffffff ||
+			!Array.isArray(data) ||
+			!data.every(isByte)
+		) {
 			return { success: false, message: 'Invalid timeline command.' }
 		}
 		try {
@@ -2390,11 +2662,11 @@ class HandshakeConnection {
 			})
 			return { success: true, message: 'Timeline command sent' }
 		} catch (error) {
-			return { success: false, message: `Error creating timeline command: ${error.message}` }
+			return { success: false, message: `Error creating timeline command: ${errorMessage(error)}` }
 		}
 	}
 
-	sendEMemTargeted(eMemNum, did, mode) {
+	sendEMemTargeted(eMemNum: number, did: number, mode: number): CommandResult {
 		if (this.isClosing || this.mainHandshakeStage !== 9) {
 			return { success: false, message: 'Not connected.' }
 		}
@@ -2421,7 +2693,7 @@ class HandshakeConnection {
 			})
 			return { success: true, message: `Targeted EMEM ${eMemNum} sent` }
 		} catch (error) {
-			return { success: false, message: `Error creating command: ${error.message}` }
+			return { success: false, message: `Error creating command: ${errorMessage(error)}` }
 		}
 	}
 
@@ -2432,7 +2704,7 @@ class HandshakeConnection {
 	 * Per GV K-Frame protocol: one 52-byte packet per AUX bus, marker 0x19.
 	 * @param {number} busIndex - AUX bus index 0-95 (0x00-0x5f)
 	 */
-	buildAuxSubscriptionPacket(busIndex) {
+	buildAuxSubscriptionPacket(busIndex: number): SubscriptionPacket {
 		const seqNum = this.subscriptionSequence++
 		const subId = this.nextSubscriptionId++
 
@@ -2473,8 +2745,7 @@ class HandshakeConnection {
 		offset += 1 // 48:    Marker byte (AUX)
 		packet.writeUInt16BE(0x0000, offset)
 		offset += 2 // 49-50: Address (PGM layer)
-		packet.writeUInt8(busIndex, offset)
-		offset += 1 // 51:    AUX bus index
+		packet.writeUInt8(busIndex, offset) // 51:    AUX bus index
 
 		return { packet, subId }
 	}
@@ -2486,7 +2757,7 @@ class HandshakeConnection {
 	 *   bus_code: A=0, B=1, C=2, D=3
 	 *   me_num: ME1=0, ME2=1, ME3=2, PGM=3, ME4=4
 	 */
-	buildMESubscriptionPacket(address) {
+	buildMESubscriptionPacket(address: number): SubscriptionPacket {
 		const seqNum = this.subscriptionSequence++
 		const subId = this.nextSubscriptionId++
 
@@ -2527,14 +2798,13 @@ class HandshakeConnection {
 		offset += 1 // 48:    Marker byte (ME)
 		packet.writeUInt16BE(0x0000, offset)
 		offset += 2 // 49-50: Reserved
-		packet.writeUInt8(address, offset)
-		offset += 1 // 51:    ME address byte
+		packet.writeUInt8(address, offset) // 51:    ME address byte
 
 		return { packet, subId }
 	}
 
 	/** Build a captured-format scalar CPL parameter subscription (PID + DID). */
-	buildParameterSubscriptionPacket(pid, did, subId = this.nextSubscriptionId++) {
+	buildParameterSubscriptionPacket(pid: number, did: number, subId = this.nextSubscriptionId++): SubscriptionPacket {
 		const packet = Buffer.alloc(52)
 		let offset = 0
 		packet.writeUInt16BE(0x0004, offset)
@@ -2569,7 +2839,7 @@ class HandshakeConnection {
 	}
 
 	/** Build the captured CPL list subscription envelope used by the Menu. */
-	buildListSubscriptionPacket(lid, did, subId = this.nextSubscriptionId++) {
+	buildListSubscriptionPacket(lid: number, did: number, subId = this.nextSubscriptionId++): SubscriptionPacket {
 		const packet = Buffer.alloc(52)
 		let offset = 0
 		packet.writeUInt16BE(0x0004, offset)
@@ -2603,14 +2873,14 @@ class HandshakeConnection {
 		return { packet, subId }
 	}
 
-	subscribeToMasterTimeline() {
+	subscribeToMasterTimeline(): CommandResult {
 		if (this.isClosing || this.mainHandshakeStage !== 9) {
 			return { success: false, message: 'Not connected.' }
 		}
 		if (this.timelineSubscribed) return { success: true, message: 'Already subscribed to master timeline.' }
 
 		const did = 0x35000001
-		const parameters = [
+		const parameters: TimelineParameterSubscription[] = [
 			{ pid: 5904, key: 'cursorTime' },
 			{ pid: 5905, key: 'duration' },
 			{ pid: 5921, key: 'pauseState' },
@@ -2637,7 +2907,7 @@ class HandshakeConnection {
 		return { success: true, message: 'Master timeline subscription in progress.' }
 	}
 
-	parseTimelineParameterResponse(msg, pb, payLen) {
+	parseTimelineParameterResponse(msg: Buffer, pb: number, payLen: number): boolean {
 		if (payLen < 22 || pb + payLen > msg.length) return false
 		const subId = msg.readUInt16BE(pb)
 		const expected = this.timelineSubscriptionIds.get(subId)
@@ -2647,7 +2917,7 @@ class HandshakeConnection {
 		const dataType = msg.readUInt16BE(pb + 18)
 		if (pid !== expected.pid || did !== 0x35000001) return false
 
-		let value
+		let value: number
 		if ([5, 11, 12, 13, 14, 15, 16, 17].includes(dataType) && payLen >= 24) value = msg.readFloatBE(pb + 20)
 		else if (dataType === 0 || dataType === 18) value = msg.readInt16BE(pb + 20)
 		else if (dataType === 1 && payLen >= 24) value = msg.readInt32BE(pb + 20)
@@ -2664,7 +2934,7 @@ class HandshakeConnection {
 		return true
 	}
 
-	parseTimelineKeyframeResponse(msg, pb, payLen) {
+	parseTimelineKeyframeResponse(msg: Buffer, pb: number, payLen: number): boolean {
 		if (payLen < 16 || pb + payLen > msg.length) return false
 		if (msg.readUInt16BE(pb) !== this.timelineKeyframeSubscriptionId) return false
 		if (msg.readUInt16BE(pb + 2) !== 0x0001 || msg.readUInt16BE(pb + 4) !== 0x0004) return false
@@ -2712,7 +2982,7 @@ class HandshakeConnection {
 		return true
 	}
 
-	subscribeToImageStore() {
+	subscribeToImageStore(): CommandResult {
 		if (this.isClosing || this.mainHandshakeStage !== 9) return { success: false, message: 'Not connected.' }
 		if (this.imageStoreSubscribed) return { success: true, message: 'Already subscribed to Image Store outputs.' }
 		let output = 1
@@ -2731,7 +3001,7 @@ class HandshakeConnection {
 		return { success: true, message: 'Image Store output subscription in progress.' }
 	}
 
-	parseImageStoreParameterResponse(msg, pb, payLen) {
+	parseImageStoreParameterResponse(msg: Buffer, pb: number, payLen: number): boolean {
 		if (payLen < 24 || pb + payLen > msg.length) return false
 		const subId = msg.readUInt16BE(pb)
 		const output = this.imageStoreSubscriptionIds.get(subId)
@@ -2746,14 +3016,14 @@ class HandshakeConnection {
 		return true
 	}
 
-	subscribeToTransitionTelemetry() {
+	subscribeToTransitionTelemetry(): CommandResult {
 		if (this.isClosing || this.mainHandshakeStage !== 9) return { success: false, message: 'Not connected.' }
 		if (this.transitionTelemetrySubscribed)
 			return { success: true, message: 'Already subscribed to transition telemetry.' }
 		const meIndexes = [0, 1, 2, 3, 4]
 		const requests = meIndexes
 			.flatMap((index) => [0x03000000 + index, 0x03000010 + index])
-			.flatMap((did) => [4454, 4458, 4459].map((pid) => ({ did, pid })))
+			.flatMap((did) => [4454, 4458, 4459].map((pid): ParameterTarget => ({ did, pid })))
 		let index = 0
 		const sendNext = () => {
 			if (this.isClosing || index >= requests.length) {
@@ -2770,13 +3040,13 @@ class HandshakeConnection {
 		return { success: true, message: 'Transition telemetry subscription in progress.' }
 	}
 
-	parseTransitionTelemetryResponse(msg, pb, payLen) {
+	parseTransitionTelemetryResponse(msg: Buffer, pb: number, payLen: number): boolean {
 		if (payLen < 21 || pb + payLen > msg.length) return false
 		const subId = msg.readUInt16BE(pb)
 		const expected = this.transitionSubscriptionIds.get(subId)
 		if (!expected || msg.readUInt16BE(pb + 8) !== expected.pid || msg.readUInt32BE(pb + 12) !== expected.did)
 			return false
-		const previous = this.transitionTelemetry.get(expected.did) ?? {
+		const previous: TransitionTelemetryState = this.transitionTelemetry.get(expected.did) ?? {
 			ramp: 0,
 			effectiveRate: 1,
 			active: false,
@@ -2812,7 +3082,7 @@ class HandshakeConnection {
 	 * Sends 96 individual subscription packets (one per AUX bus, 0x00-0x5f).
 	 * Pauses 5ms every 16 packets to prevent UDP flooding.
 	 */
-	subscribeToAuxBus() {
+	subscribeToAuxBus(): CommandResult {
 		if (this.isClosing || this.mainHandshakeStage !== 9) {
 			return { success: false, message: 'Not connected.' }
 		}
@@ -2833,8 +3103,7 @@ class HandshakeConnection {
 					}
 					return
 				}
-				const { packet, subId } = this.buildAuxSubscriptionPacket(busIdx)
-				this.auxSubscriptionIds.set(subId, busIdx + 1)
+				const { packet } = this.buildAuxSubscriptionPacket(busIdx)
 				this.sendToFrame(packet)
 				busIdx++
 				setTimeout(sendNext, 50)
@@ -2842,7 +3111,7 @@ class HandshakeConnection {
 			sendNext()
 			return { success: true, message: 'AUX subscription in progress (96 buses)' }
 		} catch (error) {
-			return { success: false, message: `Error creating subscription: ${error.message}` }
+			return { success: false, message: `Error creating subscription: ${errorMessage(error)}` }
 		}
 	}
 
@@ -2850,7 +3119,7 @@ class HandshakeConnection {
 	 * Subscribe to 20 A-D bus and 30 K1-K6 source selections across five MEs.
 	 * Sends one read-only subscription every 50ms on either transport.
 	 */
-	subscribeToMEBus() {
+	subscribeToMEBus(): CommandResult {
 		if (this.isClosing || this.mainHandshakeStage !== 9) {
 			return { success: false, message: 'Not connected.' }
 		}
@@ -2861,7 +3130,7 @@ class HandshakeConnection {
 
 		try {
 			// Subscribe to 20 A-D buses and 30 keyer source selections in one paced queue.
-			const addresses = []
+			const addresses: { address: number; keyer: boolean }[] = []
 			for (let busCode = 0; busCode <= 3; busCode++) {
 				// A=0, B=1, C=2, D=3
 				for (let meNum = 0; meNum <= 4; meNum++) {
@@ -2888,10 +3157,9 @@ class HandshakeConnection {
 					return
 				}
 				const { address, keyer } = addresses[idx]
-				const { packet, subId } = keyer
+				const { packet } = keyer
 					? this.buildParameterSubscriptionPacket(0x103a, 0x08000000 + address)
 					: this.buildMESubscriptionPacket(address)
-				if (!keyer) this.meSubscriptionIds.set(subId, address)
 				this.sendToFrame(packet)
 				idx++
 				setTimeout(sendNext, 50)
@@ -2899,7 +3167,7 @@ class HandshakeConnection {
 			sendNext()
 			return { success: true, message: 'ME subscription in progress (20 buses, 30 keyer sources)' }
 		} catch (error) {
-			return { success: false, message: `Error creating ME subscription: ${error.message}` }
+			return { success: false, message: `Error creating ME subscription: ${errorMessage(error)}` }
 		}
 	}
 
@@ -2918,14 +3186,14 @@ class HandshakeConnection {
 	 *   - pb+8 == 0x104a, pb+12 == 0x19 → AUX response
 	 *   - pb+8 == 0x104a, pb+12 == 0x04 → ME Bus response (logged only)
 	 */
-	handleSubscriptionData(msg) {
+	handleSubscriptionData(msg: Buffer): void {
 		if (msg.length < 8) return
 
 		try {
 			let offset = 4 // Skip outer header (cmd_type + sequence)
 
 			while (offset + 12 <= msg.length) {
-				const subCmd = msg.readUInt16BE(offset)
+				// const subCmd = msg.readUInt16BE(offset);
 				const respType = msg.readUInt16BE(offset + 2)
 				const payLen = msg.readUInt32BE(offset + 4)
 				// const secLen = msg.readUInt32BE(offset + 8);
@@ -3043,7 +3311,7 @@ class HandshakeConnection {
 				offset += 12 + payLen
 			}
 		} catch (e) {
-			this.emitter.emit('status', 'SUB_PARSE_ERROR', e.message)
+			this.emitter.emit('status', 'SUB_PARSE_ERROR', errorMessage(e))
 		}
 	}
 
@@ -3052,7 +3320,7 @@ class HandshakeConnection {
 	 * Records contain source ID + 6 null-terminated strings (OLED, short, eng, panel, menu, unused).
 	 * Record wrappers: 12 bytes (range_start[4] + range_end[4] + prefix[2] + record_length[2]).
 	 */
-	parseSourceNameResponse(msg, pb, payLen) {
+	parseSourceNameResponse(msg: Buffer, pb: number, payLen: number): void {
 		let namesUpdated = 0
 		try {
 			// Records start at pb + 16 (after the 16-byte response header area)
@@ -3087,7 +3355,7 @@ class HandshakeConnection {
 				let strPos = pos + 9 // Start of first string
 
 				// Read 6 null-terminated strings
-				const strings = []
+				const strings: string[] = []
 				for (let s = 0; s < 6 && strPos < recEnd; s++) {
 					const nullIdx = msg.indexOf(0x00, strPos)
 					const end = nullIdx >= 0 && nullIdx < recEnd ? nullIdx : recEnd
@@ -3098,7 +3366,7 @@ class HandshakeConnection {
 				// Pad with empty strings if fewer than 6 found
 				while (strings.length < 6) strings.push('')
 
-				const entry = {
+				const entry: SourceNameEntry = {
 					oled: strings[0],
 					short: strings[1],
 					eng: strings[2],
@@ -3117,7 +3385,9 @@ class HandshakeConnection {
 
 				pos = recEnd
 			}
-		} catch (e) {}
+		} catch {
+			// A malformed record ends parsing; names decoded before it are kept and published.
+		}
 
 		if (namesUpdated > 0) {
 			this.emitter.emit('sourceNamesUpdated', { count: this.sourceNames.size })
@@ -3129,7 +3399,7 @@ class HandshakeConnection {
 	 * Records contain source ID + engineering name (near end of record).
 	 * Only merges the eng field — does not overwrite OLED/panel/menu from 0x020b.
 	 */
-	parseSourceDefResponse(msg, pb, payLen) {
+	parseSourceDefResponse(msg: Buffer, pb: number, payLen: number): void {
 		let defsUpdated = 0
 		try {
 			let pos = pb + 16
@@ -3172,7 +3442,9 @@ class HandshakeConnection {
 
 				pos = recEnd
 			}
-		} catch (e) {}
+		} catch {
+			// A malformed record ends parsing; names decoded before it are kept and published.
+		}
 
 		if (defsUpdated > 0) {
 			this.emitter.emit('sourceNamesUpdated', { count: this.sourceNames.size })
@@ -3183,14 +3455,14 @@ class HandshakeConnection {
 	 * Get source name entry for a specific source number
 	 * @returns {{ oled: string, short: string, eng: string, panel: string, menu: string } | null}
 	 */
-	getSourceName(sourceNum) {
+	getSourceName(sourceNum: number): SourceNameEntry | null {
 		return this.sourceNames.get(sourceNum) || null
 	}
 
 	/**
 	 * Get every cached source name as a detached, source-number-sorted list.
 	 */
-	getSourceNames() {
+	getSourceNames(): (SourceNameEntry & { id: number })[] {
 		return Array.from(this.sourceNames.entries())
 			.sort(([a], [b]) => a - b)
 			.map(([id, names]) => ({ id, ...names }))
@@ -3200,7 +3472,7 @@ class HandshakeConnection {
 	 * Resolve a source number to the best display name.
 	 * Priority: menu > oled > panel > eng. Returns null if no name found (caller falls back to hardcoded).
 	 */
-	resolveSourceDisplayName(sourceNum) {
+	resolveSourceDisplayName(sourceNum: number): string | null {
 		const names = this.sourceNames.get(sourceNum)
 		if (names) {
 			if (names.menu) return names.menu
@@ -3214,7 +3486,7 @@ class HandshakeConnection {
 	/**
 	 * Get current source on a specific AUX bus
 	 */
-	getAuxSource(auxNum) {
+	getAuxSource(auxNum: number): number | null {
 		return this.auxState.get(auxNum) || null
 	}
 
@@ -3224,26 +3496,26 @@ class HandshakeConnection {
 	 * Get current source on a specific ME bus
 	 * @param {number} address - ME address byte: (bus_code << 4) | me_num
 	 */
-	getKeyerSource(address) {
+	getKeyerSource(address: number): number | null {
 		return this.keyerState.get(address) ?? null
 	}
 
-	getMESource(address) {
+	getMESource(address: number): number | null {
 		return this.meState.get(address) || null
 	}
 
-	getTimelineState() {
+	getTimelineState(): TimelineState {
 		return { ...this.timelineState, pausePoints: [...this.timelineState.pausePoints] }
 	}
 
-	getImageStoreImage(output) {
+	getImageStoreImage(output: number): number | null {
 		return this.imageStoreState.get(output) ?? null
 	}
 
-	getTransitionTelemetry(did) {
+	getTransitionTelemetry(did: number): TransitionTelemetryState | null {
 		const state = this.transitionTelemetry.get(did)
 		return state ? { ...state } : null
 	}
 }
 
-module.exports = HandshakeConnection
+export = HandshakeConnection

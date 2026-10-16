@@ -144,6 +144,8 @@ test('button shows the same assignment regardless of subscription order', () => 
 
 test('labels with XML-invalid control characters still produce valid SVG text', () => {
 	const out = svg(labeledButtonSvg(1, 'HEAD\u0007', 'SRC\u0001\u001f&<', 0xffffff))
+	// The test looks for exactly these XML-invalid control characters.
+	// eslint-disable-next-line no-control-regex
 	assert.equal(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(out.replace(/[\t\n\r]/g, '')), false)
 	assert.ok(out.includes('SRC&amp;&lt;'))
 })

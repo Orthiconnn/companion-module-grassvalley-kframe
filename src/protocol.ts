@@ -72,4 +72,4 @@ export type ProtocolManager = {
 	clientEmitter: NodeJS.EventEmitter
 }
 
-export const protocol = protocolModule as ProtocolManager
+export const protocol: ProtocolManager = protocolModule
