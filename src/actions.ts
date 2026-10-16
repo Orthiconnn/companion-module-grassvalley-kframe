@@ -1,5 +1,5 @@
 import type ModuleInstance from './main.js'
-import { buttonStyle, suiteId } from './main.js'
+import { buttonStyle, requireSuiteId } from './main.js'
 import { ME_INDEXES } from './mix-effects.js'
 import { buildButtonMapping, buildGpi, buildPbusRecall, buildPbusTrigger, PBUS_TRIGGERS } from './cpl-commands.js'
 
@@ -133,7 +133,7 @@ export function UpdateActions(self: ModuleInstance): void {
 		label: 'Show Suite Dot',
 		default: true,
 	}
-	const id = (e: { options: { suite?: string } }) => self.connectionId(suiteId(e.options.suite))
+	const id = (e: { options: { suite?: string } }) => self.connectionId(requireSuiteId(e.options.suite))
 	// Companion fails an action call after a few seconds, but a handshake can take
 	// up to 20 s. Start the connection and report its failure in the log instead.
 	const connectInBackground = (suite: unknown): void => {
@@ -154,20 +154,20 @@ export function UpdateActions(self: ModuleInstance): void {
 			name: 'Connection: Connect',
 			...suiteSubscription,
 			options: [suiteOption, textSizeOption, showSuiteOption],
-			callback: (e) => connectInBackground(e.options.suite),
+			callback: (e) => connectInBackground(requireSuiteId(e.options.suite)),
 		},
 		disconnect: {
 			name: 'Connection: Disconnect',
 			...suiteSubscription,
 			options: [suiteOption, textSizeOption, showSuiteOption],
-			callback: async (e) => self.disconnectSuite(e.options.suite),
+			callback: async (e) => self.disconnectSuite(requireSuiteId(e.options.suite)),
 		},
 		connection_toggle: {
 			name: 'Connection: Connect / Disconnect',
 			...suiteSubscription,
 			options: [suiteOption, textSizeOption, showSuiteOption],
 			callback: async (e) => {
-				const suite = suiteId(e.options.suite),
+				const suite = requireSuiteId(e.options.suite),
 					status = self.suiteStates[suite].status
 				// A press while the previous Disconnect is still closing means connect again.
 				if (!self.isSuiteDisconnecting(suite) && (status === 'connected' || status === 'connecting'))

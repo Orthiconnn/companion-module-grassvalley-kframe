@@ -522,30 +522,25 @@ class HandshakeConnection {
 			const sock = new net.Socket()
 			this.tcpSocket = sock // Cleanup must own the socket during detection too.
 			let settled = false
+			// A failed detection releases the socket, so later cleanup does not wait on it.
+			const fail = (error: Error): void => {
+				settled = true
+				clearTimeout(timer)
+				sock.destroy()
+				if (this.tcpSocket === sock) this.tcpSocket = null
+				reject(error)
+			}
 
 			const timer = setTimeout(() => {
-				if (!settled) {
-					settled = true
-					sock.destroy()
-					reject(new Error('TCP connect timeout'))
-				}
+				if (!settled) fail(new Error('TCP connect timeout'))
 			}, TCP_DETECT_TIMEOUT)
 
 			sock.on('error', (err) => {
-				if (!settled) {
-					settled = true
-					clearTimeout(timer)
-					sock.destroy()
-					reject(err)
-				}
+				if (!settled) fail(err)
 			})
 
 			sock.once('close', () => {
-				if (!settled) {
-					settled = true
-					clearTimeout(timer)
-					reject(new Error('TCP detection socket closed'))
-				}
+				if (!settled) fail(new Error('TCP detection socket closed'))
 			})
 
 			// Connect without binding to a specific local port - the frame validates via
@@ -1706,8 +1701,9 @@ class HandshakeConnection {
 				if (settled) return
 				settled = true
 				signal.removeEventListener('abort', cancel)
-				this.requireMainClient().removeListener('error', onError)
-				this.requireListenerClient().removeListener('error', onError)
+				// Cleanup may already have released the sockets.
+				this.mainClient?.removeListener('error', onError)
+				this.listenerClient?.removeListener('error', onError)
 				if (error) reject(error)
 				else resolve(() => this.cleanup())
 			}
@@ -1940,6 +1936,9 @@ class HandshakeConnection {
 				if (newlyAnnouncedPort > 0 && newlyAnnouncedPort < 65536) {
 					this.announcedTargetPort = newlyAnnouncedPort
 					this.requireListenerClient().send(this.expectedPayloadPacket10, rinfo.port, rinfo.address, (err) => {
+						// The connection may have been closed (timeout, Disconnect, config save)
+						// while this send was in flight; the main socket is gone by then.
+						if (this.isClosing) return
 						if (!err) {
 							if (this.mainHandshakeStage === 5) {
 								this.mainHandshakeStage = 6

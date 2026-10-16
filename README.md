@@ -73,6 +73,10 @@ Validation on 2026-10-14: synthetic UDP and TCP packets reproduce the original s
 
 All code is checked; nothing is excluded. `yarn build` type-checks every source file with strict TypeScript, including the protocol layer (`src/protocol/*.cts`, CommonJS TypeScript). `yarn lint` runs eslint on `src/` and `test/`, and `yarn prettier --check .` covers every source, test, doc and config file (`package.json` keeps the package manager's own formatting). `yarn test` (also `npm test`) builds and runs every test. CI runs build, lint, formatting and the tests on every push.
 
+## 2026.0.9 release review
+
+Commands for an unknown suite (a typo, or an expression returning `2` or `Suite 2`) are rejected instead of acting on Suite 1. Saving the configuration keeps suites that are live and unaffected (same IP, still ticked) connected; only suites whose IP or selection changed reconnect. A late UDP handshake send callback after a disconnect no longer throws. A failed TCP detection releases its socket immediately.
+
 ## 2026.0.9.9 safety checks
 
 An unknown Transition type is now rejected instead of firing an AUTO transition, and an unknown AUX transition is rejected instead of becoming a cut. A config save during a manual Connect now closes that stale connection at once. Tests no longer contact the default frame port 5000 on the test machine.
@@ -110,7 +114,7 @@ All 191 presets and 431 option variations (every crosspoint, E-MEM, transition, 
 
 Reliability and correctness fixes from a full code review. Each item has a regression test in `npm test`, and the new tests fail against 2026.0.9.2. Tests use synthetic packets and loopback sockets; these fixes have not yet been validated on a live frame.
 
-- Connection lifecycle: only transport failures (TCP, main/listener socket, Packet 1) are fatal; failed command sends and aux-state persistence report a non-fatal warning and keep the link up. Startup no longer reports an error when aux-state persistence is not configured. The retry loop stops immediately when no target IP is set. `destroy()` during a configuration change no longer reconnects. Concurrent connects for one suite are serialised so no orphaned connection survives. The connect wait follows status events instead of polling.
+- Connection lifecycle: only transport failures (TCP, main/listener socket, Packet 1) are fatal; failed command sends report a non-fatal warning and keep the link up. Startup no longer reports an error when aux-state persistence is not configured. The retry loop stops immediately when no target IP is set. `destroy()` during a configuration change no longer reconnects. Concurrent connects for one suite are serialised so no orphaned connection survives. The connect wait follows status events instead of polling.
 - Crash safety: UDP sends after disconnect (timeline subscription, second suite-select packet, or any closed socket) are skipped or reported instead of throwing an uncaught socket error.
 - Commands: Stop-All discards queued macro commands so none start afterward. Numeric command inputs and target DIDs must be whole numbers in range; NaN, fractions, and text are rejected before sending.
 - Frame parsing: short AUX/ME responses no longer read into the next packed response. TCP framing discards headerless data and resyncs past a stray header instead of stalling.

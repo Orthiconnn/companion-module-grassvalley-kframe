@@ -364,7 +364,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 			const targetLabel = `${family.target} BOTH`
 			presets[`transition-${family.id}-${transition}`] = {
 				type: 'simple',
-				name: `${family.label} Program ${transition.toUpperCase()}`,
+				name: `${family.label} ${transition.toUpperCase()} (Primary + Secondary)`,
 				style: labeledPresetStyle(
 					targetLabel,
 					transition.toUpperCase(),

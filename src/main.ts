@@ -24,8 +24,15 @@ export type SuiteState = {
 	timer?: NodeJS.Timeout
 }
 
+// Display fallback: drawing a button for an unknown suite shows Suite 1.
 export function suiteId(value: unknown): SuiteId {
 	return SUITES.includes(value as SuiteId) ? (value as SuiteId) : 'suite1a'
+}
+// Commands must never fall back: an unknown suite (a typo or an expression such as
+// 2 or "Suite 2") would otherwise act on Suite 1.
+export function requireSuiteId(value: unknown): SuiteId {
+	if (SUITES.includes(value as SuiteId)) return value as SuiteId
+	throw new Error(`Invalid suite ${JSON.stringify(value)} (expected suite1a to suite4a)`)
 }
 export function suiteNumber(id: SuiteId): number {
 	return Number(id[5])
@@ -229,6 +236,19 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	}
 
 	async configUpdated(config: ModuleConfig): Promise<void> {
+		// Keep live suites up when a save does not affect them (same IP, still ticked),
+		// so ticking Suite 3 or changing the retry count does not drop Suite 1 on air.
+		const previous = this.config
+		const keep = new Set(
+			SUITES.filter(
+				(id) =>
+					previous?.host === config.host &&
+					suiteEnabled(previous, suiteNumber(id)) &&
+					suiteEnabled(config, suiteNumber(id)) &&
+					this.suiteStates[id].status === 'connected',
+			),
+		)
+		const restart = SUITES.filter((id) => !keep.has(id))
 		this.shuttingDown = true
 		const generation = ++this.connectionConfigGeneration
 		this.config = config
@@ -250,10 +270,10 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			clearTimeout(this.transitionRefreshTimer)
 			this.transitionRefreshTimer = undefined
 		}
-		await Promise.all(SUITES.map(async (id) => protocol.disconnectConnection(this.connectionId(id))))
+		await Promise.all(restart.map(async (id) => protocol.disconnectConnection(this.connectionId(id))))
 		// destroy() or a newer configUpdated() ran during the await and owns state now.
 		if (generation !== this.connectionConfigGeneration) return
-		for (const id of SUITES) {
+		for (const id of restart) {
 			if (this.suiteStates[id].timer) clearTimeout(this.suiteStates[id].timer)
 			this.suiteStates[id] = { status: 'disconnected', frameVersion: '', protocolName: '', heartbeatFlash: false }
 		}
