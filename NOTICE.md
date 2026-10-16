@@ -9,6 +9,4 @@ Copyright © 2024–2026 Brad Shaffer. Licensed under the MIT License included w
 
 The MIT License permits use, modification, and redistribution when its copyright and permission notices are preserved. Contributions should be submitted through the official repository and coordinated with the maintainer when they materially affect compatibility, protocol behavior, or project direction.
 
-Forks and modified distributions are not official or endorsed releases unless Brad Shaffer provides written approval. Grass Valley product names are used solely to identify interoperability targets; this independent project is not affiliated with or endorsed by Grass Valley.
-
 This repository is intended to continue the existing Bitfocus `grassvalley-kframe` module as its next version, with upgrade scripts that carry existing connections forward, rather than split users between competing modules for the same Grass Valley product family. The KFrame name identifies the frame family; compatible panels and frame platforms are listed separately in the Companion manifest's product metadata.

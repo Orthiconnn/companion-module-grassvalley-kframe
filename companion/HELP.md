@@ -2,7 +2,7 @@
 
 Companion module by Brad Shaffer / Orthicon for controlling Grass Valley K-Frame, X-Frame and XP-Frame production switchers (Kayenne, Karrera and Korona control panels) through the CPL protocol.
 
-This beta release ports the verified GV Macro Player Stream Deck v2026.3.0.0 protocol engine to Companion.
+It grew out of Brad Shaffer's original Grass Valley Stream Deck integration (Orthicon, 2025) and uses the same protocol engine.
 
 ## Configuration
 
@@ -22,7 +22,7 @@ The upgrade runs automatically when Companion loads the new version; users do no
 
 Native actions cover connection, macros, AUX routing, crosspoints, E-MEM, transitions, panel memory, Image Store, timeline RUN, GPI, PBUS recall/trigger, and panel button mapping. An advanced raw-CPL action is included for engineering and protocol testing.
 
-Connection and macro-active feedbacks, connection variables, and Stream Deck-inspired defaults are included for Macro 1–8, AUX 1–4, E-MEM, Image Store, RUN, recall, trigger, and GPI workflows. This build has been tested against V14 and V18 frame simulators. Continue testing on a non-air system before production use.
+Connection and macro-active feedbacks, connection variables, and Stream Deck-inspired defaults are included for Macro 1–8, AUX 1–4, E-MEM, Image Store, RUN, recall, trigger, and GPI workflows.
 
 New preset buttons use **Border when pressed**. Their status icons follow Companion's global button-appearance setting; set that global option to **Show all** when all button status icons should always be visible.
 
@@ -40,10 +40,6 @@ Macro Stop All uses the K-Frame all-macros Stop event and also stops macros paus
 
 Button Mapping changes the switcher panel mapping. PBUS Trigger sends a clear/select/fire/clear sequence. Confirm targets on a simulator or non-air system before using either action in production.
 
-## Authorship and legal notice
-
-This Companion module is the substantially expanded successor to Brad Shaffer's original Grass Valley Stream Deck integration, first published by Orthicon in 2025. The connection and protocol implementation was originally developed by Brad Shaffer for interoperability with Grass Valley production-switching systems. No Grass Valley source code, firmware, binaries, or proprietary documentation are distributed with this module.
-
-This software is not affiliated with or endorsed by Grass Valley®. Grass Valley® is a registered trademark of its respective owner. The User agrees to indemnify and hold harmless the Developer from all claims, damages, or liabilities arising from use of this Software with any Grass Valley® hardware or systems.
+## Credits
 
 Thanks to: Seth Madway (testing)

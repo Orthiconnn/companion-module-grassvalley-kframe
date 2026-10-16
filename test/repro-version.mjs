@@ -1,5 +1,6 @@
 // Run after build: node --test test/repro-version.mjs
-// The version announced to the frame must follow package.json (2026.0.9-beta.N -> 2026.0.9.N).
+// The version announced to the frame must follow package.json
+// (2026.0.9 -> 2026.0.9.0, 2026.0.9-beta.N -> 2026.0.9.N).
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { readFileSync } from 'node:fs'
@@ -7,7 +8,7 @@ import { MODULE_BUILD_DATE, MODULE_VERSION } from '../dist/version.js'
 
 test('frame-announced version matches package.json', () => {
 	const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
-	assert.equal(MODULE_VERSION, version.replace(/-beta\./, '.'))
+	assert.equal(MODULE_VERSION, version.includes('-beta.') ? version.replace(/-beta\./, '.') : `${version}.0`)
 })
 
 test('build date is a short "Mon D YYYY" date', () => {

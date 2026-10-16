@@ -1,12 +1,12 @@
-# Grass Valley KFrame Companion v2026.0.9.9
+# Grass Valley KFrame Companion v2026.0.9
 
 Major-version Bitfocus Companion implementation based on the Grass Valley Stream Deck application.
 
 ## Versioning
 
 - Module id: `grassvalley-kframe` (the next version of the existing Bitfocus K-Frame module)
-- Internal project version: `2026.0.9.9` (announced to the frame; `src/version.ts`, checked against package.json by `test/repro-version.mjs`)
-- Companion prerelease package version: `2026.0.9-beta.9` (SemVer)
+- Internal project version: `2026.0.9.0` (announced to the frame; `src/version.ts`, checked against package.json by `test/repro-version.mjs`)
+- Companion package version: `2026.0.9` (SemVer)
 
 ## Source baseline
 
@@ -16,7 +16,7 @@ Major-version Bitfocus Companion implementation based on the Grass Valley Stream
 
 ## Status
 
-This module is substantially complete and is being released initially as a beta while live-system testing continues. It has been exercised against Grass Valley V14 and V18 frame simulators across Suites 1–4.
+Release 2026.0.9. Tested against Grass Valley V14 (UDP) and V18 (TCP) frame simulators across Suites 1–4.
 
 The release is prepared as the next version of `grassvalley-kframe` (1.0.0 is the current Bitfocus release) and keeps its module id. grassvalley-kframe 1.0.0 shipped no upgrade scripts, so every script here runs on its connections. The permanent upgrade script converts the former Macro/AUX action schemas, send-pulse feedbacks, configuration, and variable/expression values.
 
@@ -132,7 +132,5 @@ Copyright © 2024–2026 Brad Shaffer.
 - Instagram: [@orthicon](https://www.instagram.com/orthicon/)
 
 This project is released under the MIT License. Contributions are welcome through the official repository. To preserve compatibility and quality, please coordinate substantial changes with the maintainer before proposing or distributing modified versions.
-
-Forks and modified versions must not be represented as official or endorsed releases without the maintainer's written approval.
 
 See [NOTICE.md](NOTICE.md) for authorship and project-governance information.
