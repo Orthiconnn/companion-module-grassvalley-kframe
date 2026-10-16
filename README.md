@@ -1,12 +1,12 @@
-# Grass Valley KFrame Companion v2026.0.9.6
+# Grass Valley KFrame Companion v2026.0.9.7
 
 Major-version Bitfocus Companion implementation based on the Grass Valley Stream Deck application.
 
 ## Versioning
 
 - Module id: `grassvalley-kframe` (the next version of the existing Bitfocus K-Frame module)
-- Internal project version: `2026.0.9.6` (announced to the frame; `src/version.ts`, checked against package.json by `test/repro-version.mjs`)
-- Companion prerelease package version: `2026.0.9-beta.6` (SemVer)
+- Internal project version: `2026.0.9.7` (announced to the frame; `src/version.ts`, checked against package.json by `test/repro-version.mjs`)
+- Companion prerelease package version: `2026.0.9-beta.7` (SemVer)
 
 ## Source baseline
 

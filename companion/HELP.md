@@ -1,12 +1,12 @@
 # Grass Valley KFrame
 
-Companion module by Brad Shaffer / Orthicon for controlling Grass Valley K-Frame production switchers (Kayenne, Karrera, Korona) through the CPL protocol.
+Companion module by Brad Shaffer / Orthicon for controlling Grass Valley K-Frame, X-Frame and XP-Frame production switchers (Kayenne, Karrera and Korona control panels) through the CPL protocol.
 
 This beta release ports the verified GV Macro Player Stream Deck v2026.3.0.0 protocol engine to Companion.
 
 ## Configuration
 
-Enter only the frame IP address. Ports are fixed in code and cannot be changed by the user: 6132/6133 for Suite 1, 6134/6135 for Suite 2, 6136/6137 for Suite 3, and 6138/6139 for Suite 4.
+Enter only the frame IP address. The local UDP ports are fixed in code and cannot be changed by the user: 6132/6133 for Suite 1, 6134/6135 for Suite 2, 6136/6137 for Suite 3, and 6138/6139 for Suite 4. Because the ports are fixed, use one connection of this module per Companion.
 
 Enter the frame IP, select any combination of Suites 1–4, and set the number of quick reconnection attempts. Selected suites connect automatically, one at a time, because the frame accepts one connection handshake from a computer at a time. If a suite cannot connect it waits its turn behind the other suites, retries 2 s apart for the configured number of quick attempts, then keeps retrying every 30 s until the frame answers. The protocol keepalive timing is fixed internally. Each suite's optional Connect / Disconnect button changes from red **Disconnected**, through amber **Connecting** (Establishing, then Handshake), to green **Connected**, and displays live heartbeat activity. Every operational action and feedback includes its own suite selection.
 
@@ -14,7 +14,7 @@ Enter the frame IP, select any combination of Suites 1–4, and set the number o
 
 This module is the next version of the Grass Valley K-Frame module, so existing connections update in place. Existing Macro Recall and AUX Route actions are migrated to the new action format, including their selected suite, numeric values, and Companion expressions/variables. Their former send-pulse feedbacks are replaced with live frame-name and button-tally feedbacks. The connection's IP address is preserved, and the `last_macro`, `last_aux` and `last_aux_source` variables are still published.
 
-K-Frame 1.0.0's configured suite is preserved as the initially selected suite. Additional suites can be enabled with the Suite 1–4 checkboxes. The optional **Suite Connect / Disconnect** presets provide manual control without changing the configured startup selection.
+K-Frame 1.0.0's configured suite becomes the initially selected suite. This module connects the A side of Suites 1–4, so a 1.0.0 connection set to a B suite (for example 3B) moves to the matching A suite (3A). K-Frame 1.0.0 used local UDP ports 6130/6131; update any firewall rule that allowed only those ports. Additional suites can be enabled with the Suite 1–4 checkboxes. The optional **Suite Connect / Disconnect** presets provide manual control without changing the configured startup selection.
 
 The upgrade runs automatically when Companion loads the new version; users do not run a separate migration command. Existing page positions and supported Macro/AUX action values are preserved. Companion upgrade scripts cannot replace an existing button's layered artwork, so upgraded buttons keep their former look. Add a new preset when the full suite badge, automatic frame-name label, and tally styling are desired.
 

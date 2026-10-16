@@ -11,6 +11,8 @@ import type { DropdownChoice } from '@companion-module/base'
 
 export const SUITES = ['suite1a', 'suite2a', 'suite3a', 'suite4a'] as const
 const FAST_RETRY_MS = 2000
+// Feedbacks that draw from the button's suite, text size or suite dot.
+const SUITE_BUTTON_FEEDBACKS = ['suite_badge', 'connection_state', 'timeline_progress'] as const
 const SLOW_RETRY_MS = 30000
 export type SuiteId = (typeof SUITES)[number]
 export type SuiteState = {
@@ -147,7 +149,9 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	// waits for that cleanup so the finished close cannot overwrite the new link.
 	private readonly suiteDisconnects = new Map<SuiteId, Promise<void>>()
 	private readonly automaticConnectInProgress = new Set<SuiteId>()
-	private readonly automaticConnectQueued = new Set<SuiteId>()
+	// Suite -> config generation of its queued automatic connect. Keyed by generation so
+	// a request left over from before a config change cannot block the new one.
+	private readonly automaticConnectQueued = new Map<SuiteId, number>()
 	private readonly automaticAttempts = new Map<SuiteId, number>()
 	private readonly automaticRetryTimers = new Map<SuiteId, NodeJS.Timeout>()
 	private publishedRuntimeState = ''
@@ -624,16 +628,21 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	// client at a time. A failed attempt re-queues behind the other suites, so one
 	// unreachable suite cannot hold the rest back.
 	private queueAutomaticConnect(id: SuiteId): void {
-		if (this.automaticConnectQueued.has(id) || this.automaticRetryTimers.has(id)) return
-		this.automaticConnectQueued.add(id)
 		const generation = this.connectionConfigGeneration
-		this.automaticConnectChain = this.automaticConnectChain.then(async () => {
-			try {
-				await this.connectAutomatically(id, generation)
-			} finally {
-				this.automaticConnectQueued.delete(id)
-			}
-		})
+		if (this.automaticConnectQueued.get(id) === generation || this.automaticRetryTimers.has(id)) return
+		this.automaticConnectQueued.set(id, generation)
+		this.automaticConnectChain = this.automaticConnectChain
+			.then(async () => {
+				try {
+					await this.connectAutomatically(id, generation)
+				} finally {
+					if (this.automaticConnectQueued.get(id) === generation) this.automaticConnectQueued.delete(id)
+				}
+			})
+			// A failed step must not stop the queue for the suites behind it.
+			.catch((error: unknown) => {
+				if (!this.shuttingDown) this.log('warn', `Suite ${suiteNumber(id)}: automatic connect failed: ${String(error)}`)
+			})
 	}
 
 	private shouldConnectAutomatically(id: SuiteId, generation: number): boolean {
@@ -708,7 +717,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		const actions = this.suiteButtons.get(controlId) ?? new Map<string, SuiteButton>()
 		actions.set(actionId, { suite, textSize, showSuite })
 		this.suiteButtons.set(controlId, actions)
-		this.checkFeedbacks('suite_badge')
+		this.checkFeedbacks(...SUITE_BUTTON_FEEDBACKS)
 	}
 
 	primarySuiteButton(controlId: string): SuiteButton | undefined {
@@ -721,7 +730,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			actions.delete(actionId)
 			if (actions.size === 0) this.suiteButtons.delete(controlId)
 		}
-		this.checkFeedbacks('suite_badge')
+		this.checkFeedbacks(...SUITE_BUTTON_FEEDBACKS)
 	}
 
 	private updateRuntimeState(): void {

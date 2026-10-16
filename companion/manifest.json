@@ -4,7 +4,7 @@
 	"id": "grassvalley-kframe",
 	"name": "Grass Valley KFrame",
 	"shortname": "GV KFrame",
-	"description": "Control Grass Valley K-Frame production switchers (Kayenne, Karrera, Korona) using the CPL protocol",
+	"description": "Control Grass Valley K-Frame, X-Frame and XP-Frame production switchers (Kayenne, Karrera and Korona panels) using the CPL protocol",
 	"version": "0.0.0",
 	"license": "MIT",
 	"repository": "git+https://github.com/bitfocus/companion-module-grassvalley-kframe.git",
@@ -22,6 +22,6 @@
 	},
 	"legacyIds": [],
 	"manufacturer": "Grass Valley",
-	"products": ["Kayenne", "K-Frame", "X-Frame", "XP-Frame"],
+	"products": ["K-Frame", "X-Frame", "XP-Frame", "Kayenne", "Karrera", "Korona"],
 	"keywords": ["switcher", "video", "broadcast", "CPL", "macro", "crosspoint"]
 }

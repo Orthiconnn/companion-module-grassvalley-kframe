@@ -38,7 +38,6 @@ class HandshakeConnection {
         // Timers and intervals
         this.heartbeatIntervalId = null;
         this.packet1RetryIntervalId = null;
-        this.heartbeatTimeoutId = null;
         this.handshakeOverallTimeoutId = null;
         
         // State tracking
@@ -116,7 +115,6 @@ class HandshakeConnection {
         this.lastPlayedMacro = null;          // macro number most recently played (not continued)
         this.runSeq = 0;                      // bumped on any macroStatus or lastPlayedMacro change
         this.macroStatusSubscribed = false;
-        this.macroStatusDeferTimerId = null;   // V14: defer subscribe until catalog dump settles
         // (_optimisticPlayTimer / _optimisticPlayMacro removed — the frame is
         // the sole source of truth for Playing/Paused state; see afterMacroFire)
 
@@ -124,8 +122,8 @@ class HandshakeConnection {
         this.emitter = new EventEmitter();
         
         // Configuration
-        this.mainClientPort = customPorts?.mainPort || 6130;
-        this.listenerClientPort = customPorts?.listenerPort || 6131;
+        this.mainClientPort = customPorts?.mainPort ?? 6130; // 0 = OS-assigned (tests)
+        this.listenerClientPort = customPorts?.listenerPort ?? 6131;
         this.initialServerPort = 5000;
         this.portAnnounceServerPort = 5001;
         this.heartbeatIntervalMs = 1000;
@@ -1253,8 +1251,7 @@ class HandshakeConnection {
         return found;
     }
 
-    // Legacy V14 UDP macro catalog parser retained for protocol reference.
-    // Not used by active code path because macro catalog names are treated as TCP/V16+ only.
+    // V14 UDP macro catalog parser (the V14 subscription reply path).
     // Each entry: prevOID(4) + nextOID(4) + field_count(2) + data_len(2)
     //             + data: [macro_index(2) + name1\0 + name2\0 + name3\0]
     parseMacroCatalogDataV14(msg, pb, payLen) {
@@ -1693,10 +1690,6 @@ let found = 0;
         this.lastPlayedMacro = null;
         if (!alreadyClosing) this.runSeq++;
         this.macroStatusSubscribed = false;
-        if (this.macroStatusDeferTimerId) {
-            clearTimeout(this.macroStatusDeferTimerId);
-            this.macroStatusDeferTimerId = null;
-        }
         // (no optimistic timer to clear — frame is sole source of truth)
         this.subscribedAuxes.clear(); // Reset subscription tracking so we re-subscribe on reconnect
         this.auxState.clear();        // Clear cached AUX state
@@ -1718,7 +1711,6 @@ let found = 0;
 
         if (this.heartbeatIntervalId) clearInterval(this.heartbeatIntervalId);
         if (this.packet1RetryIntervalId) clearInterval(this.packet1RetryIntervalId);
-        if (this.heartbeatTimeoutId) clearTimeout(this.heartbeatTimeoutId);
         if (this.handshakeOverallTimeoutId) clearTimeout(this.handshakeOverallTimeoutId);
         if (this.tcpHeartbeatCheckId) clearInterval(this.tcpHeartbeatCheckId);
         if (this.tcpActiveHeartbeatId) clearInterval(this.tcpActiveHeartbeatId);

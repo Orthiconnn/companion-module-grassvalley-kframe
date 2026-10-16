@@ -102,6 +102,10 @@ test('a fatal ERROR on a connected suite still disconnects and reconnects', asyn
 
 test('manual Connect is not torn down by its own startup aux-state ERROR', async () => {
 	const { module } = setup({ host: '127.0.0.1', suite1: true })
+	// Use OS-assigned local ports so a running Companion holding 6132/6133 is undisturbed.
+	const createConnection = protocol.createConnection
+	protocol.createConnection = (id, host, suite, _ports, ...rest) =>
+		createConnection(id, host, suite, { mainPort: 0, listenerPort: 0 }, ...rest)
 	protocol.clientEmitter.on('status', module.handleProtocolStatus)
 	const startupErrors = []
 	const spy = (id, type, message) => type === 'ERROR' && startupErrors.push(message)
@@ -119,6 +123,7 @@ test('manual Connect is not torn down by its own startup aux-state ERROR', async
 		void pending.catch(() => {})
 	} finally {
 		protocol.clientEmitter.off('status', spy)
+		protocol.createConnection = createConnection
 		await module.destroy()
 	}
 })
