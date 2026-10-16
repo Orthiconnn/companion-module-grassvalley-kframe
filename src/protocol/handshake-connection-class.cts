@@ -463,8 +463,11 @@ class HandshakeConnection {
         let name = null;
         let buildDate = null;
 
-        const vMatch = ascii.match(/V\d+\.\d+(?:\.\d+)?/);
-        if (vMatch) version = vMatch[0];
+        // Frame software is V14, V18, V20…; year-style versions (V2026.0.9.5) are
+        // client identities the frame relays, such as this module's own announcement.
+        for (const m of ascii.matchAll(/V(\d+)\.\d+(?:\.\d+)?/g)) {
+            if (Number(m[1]) < 1000) { version = m[0]; break; }
+        }
 
         if (ascii.includes('Frame Facility Interface')) {
             name = 'Frame Facility Interface';
