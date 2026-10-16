@@ -389,6 +389,8 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		const id = SUITES.find((suite) => this.connectionId(suite) === connectionId)
 		if (!id) return
 		const state = this.suiteStates[id]
+		// Commands sent from Companion change macro state too, not only frame reports.
+		if (type === 'MACRO_STATUS_CHANGED') this.checkFeedbacks('macro_active', 'macro_button_state', 'action_label')
 		if (type === 'CONNECTED') {
 			state.status = 'connected'
 			state.connectionPhase = undefined
@@ -459,7 +461,6 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 				}
 			}
 			this.frameMacroStates.set(connectionId, current)
-			this.checkFeedbacks('macro_active', 'macro_button_state', 'action_label')
 			if ('lastPlayedMacro' in message) {
 				const macro = Number(message.lastPlayedMacro)
 				if (Number.isFinite(macro) && macro > 0 && this.frameLastPlayedMacros.get(connectionId) !== macro) {
@@ -473,6 +474,10 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		} else if (type === 'FRAME_VERSION' && message && typeof message === 'object' && 'version' in message) {
 			state.frameVersion = String(message.version)
 			this.frameLog(connectionId, `Frame version ${state.frameVersion}`)
+		} else if (type === 'MACRO_ERROR') {
+			this.log('warn', `Suite ${suiteNumber(id)}: macro send failed: ${String(message)}`)
+		} else if (type === 'MACRO_CATALOG_TIMEOUT') {
+			this.log('warn', `FRAME Suite ${suiteNumber(id)}: macro catalog incomplete; macro names may be missing`)
 		} else if (type === 'WARNING') {
 			// Non-fatal: a failed send or persistence error leaves the link up.
 			this.log('warn', `Suite ${suiteNumber(id)}: ${String(message)}`)
