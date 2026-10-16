@@ -23,7 +23,6 @@ function connection() {
 		'127.0.0.1',
 		'suite1a',
 		{ mainPort: 0, listenerPort: 0 },
-		null,
 		'Review',
 		'0',
 		'test',
@@ -92,7 +91,6 @@ test('Cancelling during TCP detection must not open UDP sockets afterward', asyn
 	const sink = await loopbackSocket()
 	const instance = connection()
 	instance.initialServerPort = sink.address().port
-	instance.loadAuxState = async () => {}
 	let failDetection
 	let detectionStarted
 	const started = new Promise((resolve) => {
@@ -224,7 +222,6 @@ test('TCP auth-response cancellation must not reset isClosing or fall back to UD
 		socket.destroyed = true
 		socket.emit('close')
 	}
-	instance.loadAuxState = async () => {}
 	instance.tryTcpConnect = async () => {
 		instance.tcpSocket = socket
 		return true

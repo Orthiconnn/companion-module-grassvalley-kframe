@@ -16,14 +16,13 @@ const TCP_DETECT_TIMEOUT = 2000; // 2 seconds to detect V18+ frame
  * Each instance maintains its own sockets, state, and event emitter
  */
 class HandshakeConnection {
-    constructor(connectionId, targetHost, suite, customPorts, sdkGlobalSettings, suiteName, pluginVersion, buildDate) {
+    constructor(connectionId, targetHost, suite, customPorts, suiteName, moduleVersion, buildDate) {
         this.connectionId = connectionId;
         this.targetHost = targetHost;
         this.suite = suite;
         this.customPorts = customPorts;
-        this.sdkGlobalSettings = sdkGlobalSettings;
         this.suiteName = suiteName || 'Unknown';
-        this.pluginVersion = pluginVersion || '0.0.0.0';
+        this.moduleVersion = moduleVersion || '0.0.0.0';
         this.buildDate = buildDate || 'Jan  1 1970';
         this.clientName = `Companion - ${this.suiteName}`;
         
@@ -54,7 +53,6 @@ class HandshakeConnection {
         // Message ID tracking
         this.recentlyUsedIds = [];
         this.nextMacroId = 0;
-        this.lastPersistedMessageId = null;
         this.lastUsedSessionId = null;
 
         // AUX subscription state
@@ -141,7 +139,6 @@ class HandshakeConnection {
 
         // Payloads (same as original)
         this.setupPayloads();
-        this.setupTemplates();
         this.setupSuiteCommands();
     }
     
@@ -191,11 +188,6 @@ class HandshakeConnection {
         this.expectedServerHeartbeatResponse = Buffer.from([0x00, 0x02, 0x00, 0x00]);
     }
     
-    setupTemplates() {
-        // All hex-string templates replaced by buildSetParam()/buildSetEvent() computed builders.
-        // Kept as a hook for any future template additions.
-    }
-    
     setupSuiteCommands() {
         this.suiteCommands = {
             'suite1a': [
@@ -213,64 +205,8 @@ class HandshakeConnection {
             'suite4a': [
                 Buffer.from('000401f7000200060000000c00000014179602000100000700000010', 'hex'),
                 Buffer.from('000407ab00020005000000090000001004b600000100000700', 'hex')
-            ],
-            'suite1b': [
-                Buffer.from('0004017c000200060000000c0000001417960200010000070000000b', 'hex'),
-                Buffer.from('000407a700020005000000090000001004b600000100000700', 'hex')
-            ],
-            'suite2b': [
-                Buffer.from('0004017a000200060000000c0000001417960200010000070000000d', 'hex'),
-                Buffer.from('000407a700020005000000090000001004b600000100000700', 'hex')
-            ],
-            'suite3b': [
-                Buffer.from('0004017e000200060000000c0000001417960200010000070000000f', 'hex'),
-                Buffer.from('000407ab00020005000000090000001004b600000100000700', 'hex')
-            ],
-            'suite4b': [
-                Buffer.from('00040232000200060000000c00000014179602000100000700000011', 'hex'),
-                Buffer.from('000407ab00020005000000090000001004b600000100000700', 'hex')
             ]
         };
-    }
-    
-    // Aux state persistence
-    async loadAuxState() {
-        if (!this.sdkGlobalSettings) {
-            // Persistence is optional (initialize(null)); nothing to load.
-            this.lastPersistedMessageId = null;
-            this.lastUsedSessionId = null;
-            return;
-        }
-        try {
-            const settings = await this.sdkGlobalSettings.getGlobalSettings();
-            const stateKey = `com.gv.macro.player.auxState.${this.connectionId}`;
-            const state = settings[stateKey];
-            if (state && typeof state.last_message_id === 'number') {
-                this.lastPersistedMessageId = state.last_message_id;
-            } else {
-                this.lastPersistedMessageId = null;
-            }
-        } catch (error) {
-            this.emitter.emit('status', 'WARNING', `Error loading aux state: ${error.message}`);
-            this.lastPersistedMessageId = null;
-        }
-        this.lastUsedSessionId = null;
-    }
-    
-    async saveAuxState(idToSave) {
-        if (!this.sdkGlobalSettings) return;
-        try {
-            const currentGlobalSettings = await this.sdkGlobalSettings.getGlobalSettings() || {};
-            const stateKey = `com.gv.macro.player.auxState.${this.connectionId}`;
-            const newAuxState = { last_message_id: idToSave };
-            const newGlobalSettings = {
-                ...currentGlobalSettings,
-                [stateKey]: newAuxState
-            };
-            await this.sdkGlobalSettings.setGlobalSettings(newGlobalSettings);
-        } catch (error) {
-            this.emitter.emit('status', 'WARNING', `Error saving aux state: ${error.message}`);
-        }
     }
     
     generateUniqueAuxId() {
@@ -282,11 +218,7 @@ class HandshakeConnection {
             candidateId = crypto.randomInt(0, 65536);
             attempts++;
             
-            const isFirstGenThisSession = (this.lastUsedSessionId === null);
-            const collisionWithPersisted = (isFirstGenThisSession && this.lastPersistedMessageId !== null && candidateId === this.lastPersistedMessageId);
-            const collisionWithSession = (this.lastUsedSessionId !== null && candidateId === this.lastUsedSessionId);
-            
-            if (collisionWithPersisted || collisionWithSession) continue;
+            if (this.lastUsedSessionId !== null && candidateId === this.lastUsedSessionId) continue;
             break;
         } while (attempts < maxAttempts);
         
@@ -304,8 +236,6 @@ class HandshakeConnection {
 
     // Start the connection process - auto-detects TCP (V16+) or UDP (V14)
     async start() {
-        this.throwIfClosing();
-        await this.loadAuxState();
         this.throwIfClosing();
 
         this.emitter.emit('status', 'CONNECTING', 'Detecting protocol...');
@@ -490,14 +420,14 @@ class HandshakeConnection {
         return frame;
     }
 
-    // Announce plugin identity to Engineering > Panel Connections GUI after CONNECTED.
+    // Announce module identity to Engineering > Panel Connections GUI after CONNECTED.
     // Works on both TCP (V16+/V18) and UDP (V14) via sendToFrame().
     announceIdentity() {
         if (this.isClosing) return;
         const now = new Date();
         const pad = (n) => String(n).padStart(2, '0');
         const timeStr = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
-        const versionStr = `V${this.pluginVersion}`;
+        const versionStr = `V${this.moduleVersion}`;
 
         // Node Type = 8 (blank/unlabelled), PID 0x2008, DID 0x01000001, uint16
         this.sendToFrame(this.buildSetFrame(0x2008, 0x0300, 0x01000001, Buffer.from([0x00, 0x08])));
@@ -694,7 +624,7 @@ class HandshakeConnection {
                 this.fullyConnected = true;
                 this.emitter.emit('status', 'CONNECTED', 'TCP connection established.');
 
-                // Announce plugin identity to Engineering > Panel Connections
+                // Announce module identity to Engineering > Panel Connections
                 this.announceIdentity();
 
                 // Select suite after connected, then subscribe to macro catalog + status
@@ -757,23 +687,6 @@ class HandshakeConnection {
                 this.handleSubscriptionData(fakeMsg);
             }
         }
-    }
-
-    // Wait for TCP data to arrive (used during auth — legacy, kept for reference)
-    tcpWaitForData(timeoutMs) {
-        return new Promise((resolve) => {
-            const handler = (data) => {
-                this.tcpBuffer = Buffer.concat([this.tcpBuffer, data]);
-                clearTimeout(timer);
-                this.tcpSocket.removeListener('data', handler);
-                resolve();
-            };
-            const timer = setTimeout(() => {
-                this.tcpSocket.removeListener('data', handler);
-                resolve();
-            }, timeoutMs);
-            this.tcpSocket.on('data', handler);
-        });
     }
 
     tcpWaitForFrame(timeoutMs) {
@@ -2358,20 +2271,6 @@ let found = 0;
     // ─── AUX Bus Subscription Methods ────────────────────────────────────
 
     /**
-     * Get suite offset for bus byte calculation
-     * Bus byte = 0x50 + suiteOffset for AUX buses
-     */
-    getSuiteOffset() {
-        switch (this.suite) {
-            case 'suite1a': case 'suite1b': return 0;
-            case 'suite2a': case 'suite2b': return 1;
-            case 'suite3a': case 'suite3b': return 2;
-            case 'suite4a': case 'suite4b': return 3;
-            default: return 0;
-        }
-    }
-
-    /**
      * Build a subscription packet for a single AUX bus source selection (0x104a).
      * Per GV K-Frame protocol: one 52-byte packet per AUX bus, marker 0x19.
      * @param {number} busIndex - AUX bus index 0-95 (0x00-0x5f)
@@ -3080,27 +2979,6 @@ let found = 0;
         return this.auxState.get(auxNum) || null;
     }
 
-    /**
-     * Get all AUX state as a Map copy
-     */
-    getAllAuxState() {
-        return new Map(this.auxState);
-    }
-
-    /**
-     * Check if a source is on ANY aux bus (for low tally)
-     * @param {number} sourceNum - Source to search for
-     * @param {number|null} excludeAux - AUX number to exclude from search
-     * @returns {{ found: boolean, auxNum: number|null }}
-     */
-    isSourceOnAnyAux(sourceNum, excludeAux = null) {
-        for (const [auxNum, src] of this.auxState) {
-            if (excludeAux !== null && auxNum === excludeAux) continue;
-            if (src === sourceNum) return { found: true, auxNum };
-        }
-        return { found: false, auxNum: null };
-    }
-
     // ─── ME Bus Query Methods ─────────────────────────────────────────
 
     /**
@@ -3128,26 +3006,6 @@ let found = 0;
         return state ? { ...state } : null;
     }
 
-    /**
-     * Get all ME state as a Map copy
-     */
-    getAllMEState() {
-        return new Map(this.meState);
-    }
-
-    /**
-     * Check if a source is on ANY ME bus (for low tally)
-     * @param {number} sourceNum - Source to search for
-     * @param {number|null} excludeAddress - ME address to exclude from search
-     * @returns {{ found: boolean, address: number|null }}
-     */
-    isSourceOnAnyME(sourceNum, excludeAddress = null) {
-        for (const [addr, src] of this.meState) {
-            if (excludeAddress !== null && addr === excludeAddress) continue;
-            if (src === sourceNum) return { found: true, address: addr };
-        }
-        return { found: false, address: null };
-    }
 }
 
 module.exports = HandshakeConnection;

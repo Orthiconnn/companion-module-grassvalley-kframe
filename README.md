@@ -1,12 +1,12 @@
-# Grass Valley KFrame Companion v2026.0.9.5
+# Grass Valley KFrame Companion v2026.0.9.6
 
 Major-version Bitfocus Companion implementation based on the Grass Valley Stream Deck application.
 
 ## Versioning
 
 - Module id: `grassvalley-kframe` (the next version of the existing Bitfocus K-Frame module)
-- Internal project version: `2026.0.9.5` (announced to the frame; `src/version.ts`, checked against package.json by `test/repro-version.mjs`)
-- Companion prerelease package version: `2026.0.9-beta.5` (SemVer)
+- Internal project version: `2026.0.9.6` (announced to the frame; `src/version.ts`, checked against package.json by `test/repro-version.mjs`)
+- Companion prerelease package version: `2026.0.9-beta.6` (SemVer)
 
 ## Source baseline
 
@@ -68,6 +68,10 @@ Manual and frame-initiated disconnects also refresh dropdowns and presets after 
 Disconnect cleanup also clears cached source names before announcing disconnection. AUX and crosspoint dropdowns then use remaining suites' source names or numbered fallback labels. The same four regression cases verify both source dropdowns and the cleared source-name getters.
 
 Validation on 2026-10-14: synthetic UDP and TCP packets reproduce the original stale-dropdown failure and pass after the fix. Tests cover dropdowns, presets, cleared names, unchanged batches, and disconnect cleanup in `test/repro-macro-dropdown.mjs`, included in `npm test`. Live frame names were not changed for this test.
+
+## 2026.0.9.6 Companion-only cleanup
+
+Code that only served the Stream Deck plugin is removed: the Stream Deck global-settings store for AUX message IDs, the B-suite handshake commands (Companion connects Suites 1–4 A only; legacy B settings upgrade to A), unused protocol helpers and manager exports, and the unused RUN command builder. The command builders now live in `src/cpl-commands.ts`.
 
 ## 2026.0.9.4 button labels
 

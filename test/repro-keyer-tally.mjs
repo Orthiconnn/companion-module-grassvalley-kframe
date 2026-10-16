@@ -11,7 +11,7 @@ const require = createRequire(import.meta.url)
 const HandshakeConnection = require('../dist/protocol/handshake-connection-class.cjs')
 
 test('Selecting ME1 Key 1 must preserve ME1 A source and tally', (t) => {
-	const connection = new HandshakeConnection('review', '127.0.0.1', 'suite1a', {}, null, 'Review', '0', 'test')
+	const connection = new HandshakeConnection('review', '127.0.0.1', 'suite1a', {}, 'Review', '0', 'test')
 	connection.mainHandshakeStage = 9
 	connection.meState.set(0, 10) // Initial frame state: ME1 A selects source 10.
 	const packets = []
@@ -74,7 +74,7 @@ test('Selecting ME1 Key 1 must preserve ME1 A source and tally', (t) => {
 })
 
 test('All 30 keyer targets preserve the 20 bus states and emit no bus-change feedback', () => {
-	const connection = new HandshakeConnection('review', '127.0.0.1', 'suite1a', {}, null, 'Review', '0', 'test')
+	const connection = new HandshakeConnection('review', '127.0.0.1', 'suite1a', {}, 'Review', '0', 'test')
 	connection.mainHandshakeStage = 9
 	connection.sendToFrame = (_packet, callback) => callback(null)
 	for (let me = 0; me < 5; me++) {
@@ -99,7 +99,7 @@ test('All 30 keyer targets preserve the 20 bus states and emit no bus-change fee
 
 for (const target of ['ME1_A', 'ME1_K1']) {
 	test(`${target}: invalid crosspoint sources send no command or feedback changes`, () => {
-		const connection = new HandshakeConnection('validation', '127.0.0.1', 'suite1a', {}, null, 'Review', '0', 'test')
+		const connection = new HandshakeConnection('validation', '127.0.0.1', 'suite1a', {}, 'Review', '0', 'test')
 		connection.mainHandshakeStage = 9
 		connection.meState.set(0, 42)
 		connection.keyerState.set(0, 43)
@@ -156,7 +156,7 @@ for (const target of ['ME1_A', 'ME1_K1']) {
 	})
 
 	test(`${target}: valid crosspoint source boundaries and numeric strings encode exactly`, () => {
-		const connection = new HandshakeConnection('validation', '127.0.0.1', 'suite1a', {}, null, 'Review', '0', 'test')
+		const connection = new HandshakeConnection('validation', '127.0.0.1', 'suite1a', {}, 'Review', '0', 'test')
 		connection.mainHandshakeStage = 9
 		const packets = []
 		connection.sendToFrame = (packet, callback) => {

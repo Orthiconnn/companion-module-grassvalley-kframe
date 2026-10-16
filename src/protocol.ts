@@ -25,7 +25,6 @@ export type TransitionTelemetry = {
 }
 
 export type ProtocolManager = {
-	initialize(settings: unknown): void
 	createConnection(
 		id: string,
 		host: string,
@@ -36,7 +35,6 @@ export type ProtocolManager = {
 		buildDate: string,
 	): Promise<() => void>
 	disconnectConnection(id: string): Promise<void>
-	isConnected(id: string): boolean
 	getConnectionInfo(id: string): ConnectionInfo | null
 	getMacroName(id: string, macro: number): string | null
 	getMacroCatalog(id: string): Record<number, MacroCatalogEntry> | null

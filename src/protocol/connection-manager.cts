@@ -8,22 +8,17 @@ class ConnectionManager {
         this.connections = new Map(); // connectionId -> HandshakeConnection
         this.pendingCreates = new Map(); // connectionId -> gate for the latest create
         this.emitter = new EventEmitter();
-        this.sdkGlobalSettings = null;
-    }
-    
-    initialize(sdkSettings) {
-        this.sdkGlobalSettings = sdkSettings;
     }
     
     /**
      * Create a new connection
      * @param {string} connectionId - Unique identifier (e.g., suite name or context ID)
      * @param {string} targetHost - IP address
-     * @param {string} suite - Suite identifier (suite1a, suite2b, etc.)
+     * @param {string} suite - Suite identifier (suite1a to suite4a)
      * @param {object} customPorts - { mainPort, listenerPort }
      * @returns {Promise<function>} Cleanup function
      */
-    async createConnection(connectionId, targetHost, suite, customPorts, suiteName, pluginVersion, buildDate) {
+    async createConnection(connectionId, targetHost, suite, customPorts, suiteName, moduleVersion, buildDate) {
         // Serialise replace-and-register per id so a concurrent create cannot be
         // overwritten (and orphaned) while an older one awaits its disconnect.
         const previous = this.pendingCreates.get(connectionId) ?? Promise.resolve();
@@ -37,7 +32,7 @@ class ConnectionManager {
             if (this.connections.has(connectionId)) {
                 await this.disconnectConnection(connectionId);
             }
-            connection = this.registerConnection(connectionId, targetHost, suite, customPorts, suiteName, pluginVersion, buildDate);
+            connection = this.registerConnection(connectionId, targetHost, suite, customPorts, suiteName, moduleVersion, buildDate);
         } finally {
             if (this.pendingCreates.get(connectionId) === gate) this.pendingCreates.delete(connectionId);
             release();
@@ -55,7 +50,7 @@ class ConnectionManager {
         }
     }
 
-    registerConnection(connectionId, targetHost, suite, customPorts, suiteName, pluginVersion, buildDate) {
+    registerConnection(connectionId, targetHost, suite, customPorts, suiteName, moduleVersion, buildDate) {
         
         // Create new connection instance
         const connection = new HandshakeConnection(
@@ -63,9 +58,8 @@ class ConnectionManager {
             targetHost,
             suite,
             customPorts,
-            this.sdkGlobalSettings,
             suiteName,
-            pluginVersion,
+            moduleVersion,
             buildDate
         );
         
@@ -140,14 +134,6 @@ class ConnectionManager {
      */
     getActiveConnections() {
         return Array.from(this.connections.keys());
-    }
-    
-    /**
-     * Check if a connection is active and connected
-     */
-    isConnected(connectionId) {
-        const connection = this.connections.get(connectionId);
-        return connection && connection.mainHandshakeStage === 9 && !connection.isClosing;
     }
     
     /**
@@ -346,24 +332,6 @@ class ConnectionManager {
     }
 
     /**
-     * Get all AUX state for a connection
-     */
-    getAllAuxState(connectionId) {
-        const connection = this.connections.get(connectionId);
-        if (!connection) return null;
-        return connection.getAllAuxState();
-    }
-
-    /**
-     * Check if a source is on any AUX bus (for low tally)
-     */
-    isSourceOnAnyAux(connectionId, sourceNum, excludeAux = null) {
-        const connection = this.connections.get(connectionId);
-        if (!connection) return { found: false, auxNum: null };
-        return connection.isSourceOnAnyAux(sourceNum, excludeAux);
-    }
-
-    /**
      * Subscribe to ME bus source selection for a connection
      */
     subscribeToMEBus(connectionId) {
@@ -430,24 +398,6 @@ class ConnectionManager {
     }
 
     /**
-     * Get all ME state for a connection
-     */
-    getAllMEState(connectionId) {
-        const connection = this.connections.get(connectionId);
-        if (!connection) return null;
-        return connection.getAllMEState();
-    }
-
-    /**
-     * Check if a source is on any ME bus (for low tally)
-     */
-    isSourceOnAnyME(connectionId, sourceNum, excludeAddress = null) {
-        const connection = this.connections.get(connectionId);
-        if (!connection) return { found: false, address: null };
-        return connection.isSourceOnAnyME(sourceNum, excludeAddress);
-    }
-
-    /**
      * Subscribe to source names (0x0210 + 0x020b) for a connection
      */
     subscribeToSourceNames(connectionId) {
@@ -456,15 +406,6 @@ class ConnectionManager {
             return { success: false, message: `No connection found: ${connectionId}` };
         }
         return connection.subscribeToSourceNames();
-    }
-
-    /**
-     * Get source name entry for a specific source number
-     */
-    getSourceName(connectionId, sourceNum) {
-        const connection = this.connections.get(connectionId);
-        if (!connection) return null;
-        return connection.getSourceName(sourceNum);
     }
 
     getSourceNames(connectionId) {
@@ -483,16 +424,6 @@ class ConnectionManager {
         return connection.resolveSourceDisplayName(sourceNum);
     }
 
-    /**
-     * Get all connections info
-     */
-    getAllConnectionsInfo() {
-        const info = [];
-        for (const [id, connection] of this.connections) {
-            info.push(this.getConnectionInfo(id));
-        }
-        return info;
-    }
 }
 
 // Create singleton instance
@@ -503,11 +434,9 @@ module.exports = {
     ConnectionManager,
     connectionManager,
     // Convenience exports
-    initialize: (sdkSettings) => connectionManager.initialize(sdkSettings),
-    createConnection: (id, host, suite, ports, suiteName, pluginVersion, buildDate) => connectionManager.createConnection(id, host, suite, ports, suiteName, pluginVersion, buildDate),
+    createConnection: (id, host, suite, ports, suiteName, moduleVersion, buildDate) => connectionManager.createConnection(id, host, suite, ports, suiteName, moduleVersion, buildDate),
     disconnectConnection: (id) => connectionManager.disconnectConnection(id),
     getConnection: (id) => connectionManager.getConnection(id),
-    isConnected: (id) => connectionManager.isConnected(id),
     sendMacro: (id, macroNum) => connectionManager.sendMacro(id, macroNum),
     sendMacroStop: (id, macroNum) => connectionManager.sendMacroStop(id, macroNum),
     sendMacroStopAll: (id) => connectionManager.sendMacroStopAll(id),
@@ -526,8 +455,6 @@ module.exports = {
     getMacroStatus: (id, macroNum) => connectionManager.getMacroStatus(id, macroNum),
     subscribeToAuxBus: (id) => connectionManager.subscribeToAuxBus(id),
     getAuxSource: (id, auxNum) => connectionManager.getAuxSource(id, auxNum),
-    getAllAuxState: (id) => connectionManager.getAllAuxState(id),
-    isSourceOnAnyAux: (id, sourceNum, excludeAux) => connectionManager.isSourceOnAnyAux(id, sourceNum, excludeAux),
     subscribeToMEBus: (id) => connectionManager.subscribeToMEBus(id),
     getKeyerSource: (id, address) => connectionManager.getKeyerSource(id, address),
     getMESource: (id, address) => connectionManager.getMESource(id, address),
@@ -538,14 +465,10 @@ module.exports = {
 	 subscribeToTransitionTelemetry: (id) => connectionManager.subscribeToTransitionTelemetry(id),
 	 getTransitionTelemetry: (id, did) => connectionManager.getTransitionTelemetry(id, did),
 	 sendTimelineEvent: (id, eid, did, data) => connectionManager.sendTimelineEvent(id, eid, did, data),
-    getAllMEState: (id) => connectionManager.getAllMEState(id),
-    isSourceOnAnyME: (id, sourceNum, excludeAddress) => connectionManager.isSourceOnAnyME(id, sourceNum, excludeAddress),
     subscribeToSourceNames: (id) => connectionManager.subscribeToSourceNames(id),
-    getSourceName: (id, sourceNum) => connectionManager.getSourceName(id, sourceNum),
     getSourceNames: (id) => connectionManager.getSourceNames(id),
     resolveSourceDisplayName: (id, sourceNum) => connectionManager.resolveSourceDisplayName(id, sourceNum),
     getConnectionInfo: (id) => connectionManager.getConnectionInfo(id),
-    getAllConnectionsInfo: () => connectionManager.getAllConnectionsInfo(),
     getActiveConnections: () => connectionManager.getActiveConnections(),
     clientEmitter: connectionManager.emitter
 };

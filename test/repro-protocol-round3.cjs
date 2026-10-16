@@ -9,7 +9,7 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const H = Buffer.from([0xb9, 0x91, 0x6f, 0x84])
 
 function connection() {
-	return new HandshakeConnection('round3', '127.0.0.1', 'suite1a', {}, null, 'Round3', '0', 'test')
+	return new HandshakeConnection('round3', '127.0.0.1', 'suite1a', {}, 'Round3', '0', 'test')
 }
 
 async function bound() {

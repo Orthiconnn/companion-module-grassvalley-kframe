@@ -1,7 +1,7 @@
 import type ModuleInstance from './main.js'
 import { buttonStyle, suiteId } from './main.js'
 import { ME_INDEXES } from './mix-effects.js'
-import { buildButtonMapping, buildGpi, buildPbusRecall, buildPbusTrigger, PBUS_TRIGGERS } from './legacy-actions.js'
+import { buildButtonMapping, buildGpi, buildPbusRecall, buildPbusTrigger, PBUS_TRIGGERS } from './cpl-commands.js'
 
 type SuiteOption = { suite?: string; textSize?: number; showSuite?: boolean }
 type NumberOption = { options: SuiteOption & { value: number; labelOverride?: string } }
@@ -407,7 +407,6 @@ export function UpdateActions(self: ModuleInstance): void {
 		},
 		image_store: {
 			name: 'Image Store: Select Image',
-			...suiteSubscription,
 			options: [
 				suiteOption,
 				{ id: 'output', type: 'number', label: 'Output', default: 1, min: 1, max: 10 },

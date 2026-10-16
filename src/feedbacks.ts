@@ -3,7 +3,7 @@ import type ModuleInstance from './main.js'
 import type { ButtonStyle, SuiteButton } from './main.js'
 import { suiteId, suiteNumber, suitePorts } from './main.js'
 import { CLEAR_BADGE, labeledButtonSvg, SUITE_BADGES, timelineProgressSvg } from './badges.js'
-import { PBUS_TRIGGERS } from './legacy-actions.js'
+import { PBUS_TRIGGERS } from './cpl-commands.js'
 import { ME_COLORS, ME_INDEXES, OTHER_COLORS } from './mix-effects.js'
 
 type SuiteOptions = { suite?: string }

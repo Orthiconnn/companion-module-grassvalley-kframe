@@ -6,7 +6,7 @@ import Module from '../dist/main.js'
 import { UpdateActions } from '../dist/actions.js'
 import { UpdateFeedbacks } from '../dist/feedbacks.js'
 import { UpdatePresets } from '../dist/presets.js'
-import { buildPbusTrigger } from '../dist/legacy-actions.js'
+import { buildPbusTrigger } from '../dist/cpl-commands.js'
 
 function setup() {
 	const module = new Module({ _isInstanceContext: true, id: 'pbus-label' })

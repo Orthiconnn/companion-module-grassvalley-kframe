@@ -12,7 +12,6 @@ const h = new HandshakeConnection(
 	'127.0.0.1',
 	'suite1a',
 	{ mainPort: 6130, listenerPort: 6131 },
-	null,
 	'Test',
 	'0.0.0.0',
 	'Jan  1 1970',

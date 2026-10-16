@@ -168,7 +168,6 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 
 	async init(config: ModuleConfig): Promise<void> {
 		this.config = config
-		protocol.initialize(null)
 		protocol.clientEmitter.on('status', this.handleProtocolStatus)
 		protocol.clientEmitter.on('sourceNamesUpdated', this.handleSourceNamesUpdated)
 		protocol.clientEmitter.on('auxStateChanged', this.handleAuxStateChanged)

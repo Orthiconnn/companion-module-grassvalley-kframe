@@ -1,3 +1,5 @@
+// Raw CPL command builders for GPI, PBUS and panel button mapping. Each call takes
+// the next message ID, so repeated presses are distinct frames on the wire.
 let messageId = Math.floor(Math.random() * 0x10000)
 
 function nextMessageId(): string {
@@ -9,16 +11,6 @@ function pbusCode(pbus: number): string {
 	if (!Number.isInteger(pbus) || pbus < 1 || pbus > 24) throw new Error('PBUS must be 1–24')
 	const index = pbus - 1
 	return (((Math.floor(index / 16) * 0x10) << 8) | (index % 16)).toString(16).padStart(4, '0')
-}
-
-export function buildRun(target: string): string {
-	if (target === 'MASTER') return `0004${nextMessageId()}00020005000000080000000f0002000035000001`
-	const [engine, modeName] = target.split('-')
-	const engineIndex: Record<string, number> = { ME1: 0, ME2: 1, ME3: 2, PGM: 3, ME4: 4, eDPM: 10 }
-	const modeIndex: Record<string, number> = { PRI: 0, SEC: 1, BOTH: 2 }
-	if (engineIndex[engine] === undefined || modeIndex[modeName] === undefined) throw new Error('Invalid RUN target')
-	const suffix = ((engineIndex[engine] << 8) | modeIndex[modeName]).toString(16).padStart(8, '0')
-	return `0004${nextMessageId()}0002000500000009000000100002000002${suffix}`
 }
 
 export function buildGpi(gpi: number): string {

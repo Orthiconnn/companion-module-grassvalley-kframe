@@ -1,11 +1,8 @@
 import assert from 'node:assert/strict'
-import { buildButtonMapping, buildGpi, buildPbusRecall, buildPbusTrigger, buildRun } from '../dist/legacy-actions.js'
+import { buildButtonMapping, buildGpi, buildPbusRecall, buildPbusTrigger } from '../dist/cpl-commands.js'
 
 const maskMessageId = (command) => `${command.slice(0, 4)}xxxx${command.slice(8)}`
 
-assert.equal(maskMessageId(buildRun('MASTER')), '0004xxxx00020005000000080000000f0002000035000001')
-assert.equal(maskMessageId(buildRun('ME1-PRI')), '0004xxxx000200050000000900000010000200000200000000')
-assert.equal(maskMessageId(buildRun('PGM-BOTH')), '0004xxxx000200050000000900000010000200000200000302')
 assert.equal(maskMessageId(buildGpi(40)), '0004xxxx00020005000000080000000f00020000633d0027')
 
 const recall = buildPbusRecall(24, 299).map(maskMessageId)
@@ -26,4 +23,4 @@ assert.equal(
 	'0004xxxx000200060000000a00000012138501008908c0300329',
 )
 
-console.log('16 legacy raw-action vectors passed')
+console.log('CPL command builder vectors passed')

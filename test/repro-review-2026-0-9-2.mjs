@@ -102,7 +102,6 @@ test('a fatal ERROR on a connected suite still disconnects and reconnects', asyn
 
 test('manual Connect is not torn down by its own startup aux-state ERROR', async () => {
 	const { module } = setup({ host: '127.0.0.1', suite1: true })
-	protocol.initialize(null)
 	protocol.clientEmitter.on('status', module.handleProtocolStatus)
 	const startupErrors = []
 	const spy = (id, type, message) => type === 'ERROR' && startupErrors.push(message)
