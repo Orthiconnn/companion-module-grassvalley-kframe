@@ -57,6 +57,7 @@ test('an unknown AUX transition is rejected instead of sending a cut', async () 
 	const HandshakeConnection = createRequire(import.meta.url)('../dist/protocol/handshake-connection-class.cjs')
 	const connection = new HandshakeConnection('aux', '127.0.0.1', 'suite1a', {}, 'Aux', '0', 'test')
 	connection.mainHandshakeStage = 9
+	connection.fullyConnected = true
 	const sent = []
 	connection.sendToFrame = (packet, callback) => (sent.push(packet), callback?.(null))
 	assert.equal(connection.sendAuxRoute(1, 10, 'auto').success, false)

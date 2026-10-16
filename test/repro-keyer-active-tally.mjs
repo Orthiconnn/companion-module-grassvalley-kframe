@@ -74,6 +74,7 @@ for (const [me, index] of Object.entries({ ME1: 0, ME2: 1, ME3: 2, PGM: 3, ME4: 
 test('Source subscriptions include all 30 keyers and 20 buses, once each', async () => {
 	const h = make()
 	h.mainHandshakeStage = 9
+	h.fullyConnected = true
 	const packets = []
 	h.sendToFrame = (packet) => packets.push(packet)
 	let timeout

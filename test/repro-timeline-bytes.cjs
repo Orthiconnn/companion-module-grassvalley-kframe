@@ -7,6 +7,7 @@ const HandshakeConnection = require('../dist/protocol/handshake-connection-class
 function connected() {
 	const connection = new HandshakeConnection('timeline', '127.0.0.1', 'suite1a', {}, 'Timeline', '0', 'test')
 	connection.mainHandshakeStage = 9
+	connection.fullyConnected = true
 	const sent = []
 	connection.sendToFrame = (packet, callback) => {
 		sent.push(packet)

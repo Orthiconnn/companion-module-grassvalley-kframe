@@ -2174,8 +2174,15 @@ class HandshakeConnection {
 	}
 
 	// Command methods
+	// Operator commands wait for CONNECTED. On TCP the suite select goes out right
+	// after CONNECTED, so a press during the handshake must not reach the frame
+	// before its suite is chosen.
+	readyForCommands(): boolean {
+		return !this.isClosing && this.mainHandshakeStage === 9 && this.fullyConnected
+	}
+
 	sendMacro(macroNum: number): CommandResult {
-		if (this.isClosing || this.mainHandshakeStage !== 9) {
+		if (!this.readyForCommands()) {
 			return { success: false, message: 'Not connected.' }
 		}
 
@@ -2204,7 +2211,7 @@ class HandshakeConnection {
 	}
 
 	sendMacroStop(macroNum: number): CommandResult {
-		if (this.isClosing || this.mainHandshakeStage !== 9) {
+		if (!this.readyForCommands()) {
 			return { success: false, message: 'Not connected.' }
 		}
 		if (!Number.isInteger(macroNum) || macroNum < 1 || macroNum > 999) {
@@ -2218,7 +2225,7 @@ class HandshakeConnection {
 	}
 
 	sendMacroStopAll(): CommandResult {
-		if (this.isClosing || this.mainHandshakeStage !== 9) {
+		if (!this.readyForCommands()) {
 			return { success: false, message: 'Not connected.' }
 		}
 		// Drop queued Play/Continue/Stop commands so none fire after Stop-All.
@@ -2343,7 +2350,7 @@ class HandshakeConnection {
 	}
 
 	sendAuxRoute(auxNum: number, sourceNum: number, transitionType = 'cut'): CommandResult {
-		if (this.isClosing || this.mainHandshakeStage !== 9) {
+		if (!this.readyForCommands()) {
 			return { success: false, message: 'Not connected.' }
 		}
 
@@ -2404,7 +2411,7 @@ class HandshakeConnection {
 	}
 
 	sendImageStore(outputNum: number, imageNum: number): CommandResult {
-		if (this.isClosing || this.mainHandshakeStage !== 9) {
+		if (!this.readyForCommands()) {
 			return { success: false, message: 'Not connected.' }
 		}
 
@@ -2440,7 +2447,7 @@ class HandshakeConnection {
 	}
 
 	sendImageStoreInput(inputNum: number): CommandResult {
-		if (this.isClosing || this.mainHandshakeStage !== 9) {
+		if (!this.readyForCommands()) {
 			return { success: false, message: 'Not connected.' }
 		}
 
@@ -2468,7 +2475,7 @@ class HandshakeConnection {
 	}
 
 	sendEMem(eMemNum: number): CommandResult {
-		if (this.isClosing || this.mainHandshakeStage !== 9) {
+		if (!this.readyForCommands()) {
 			return { success: false, message: 'Not connected.' }
 		}
 
@@ -2496,7 +2503,7 @@ class HandshakeConnection {
 	}
 
 	sendRawCommand(hexCommand: string): CommandResult {
-		if (this.isClosing || this.mainHandshakeStage !== 9) {
+		if (!this.readyForCommands()) {
 			return { success: false, message: 'Not connected.' }
 		}
 
@@ -2537,7 +2544,7 @@ class HandshakeConnection {
 	}
 
 	sendPanelMem(panelMemNum: number): CommandResult {
-		if (this.isClosing || this.mainHandshakeStage !== 9) {
+		if (!this.readyForCommands()) {
 			return { success: false, message: 'Not connected.' }
 		}
 
@@ -2565,7 +2572,7 @@ class HandshakeConnection {
 	}
 
 	sendCrosspoint(pid: number, did: number, sourceNum: number): CommandResult {
-		if (this.isClosing || this.mainHandshakeStage !== 9) {
+		if (!this.readyForCommands()) {
 			return { success: false, message: 'Not connected.' }
 		}
 		if (pid !== 0x104a && pid !== 0x103a) {
@@ -2614,7 +2621,7 @@ class HandshakeConnection {
 	}
 
 	sendTransitionEvent(eid: number, did: number): CommandResult {
-		if (this.isClosing || this.mainHandshakeStage !== 9) {
+		if (!this.readyForCommands()) {
 			return { success: false, message: 'Not connected.' }
 		}
 		if (eid !== 0x0043 && eid !== 0x0044) {
@@ -2639,7 +2646,7 @@ class HandshakeConnection {
 	}
 
 	sendTimelineEvent(eid: number, did: number, data: number[]): CommandResult {
-		if (this.isClosing || this.mainHandshakeStage !== 9) {
+		if (!this.readyForCommands()) {
 			return { success: false, message: 'Not connected.' }
 		}
 		const isByte = (value: number): boolean => Number.isInteger(value) && value >= 0 && value <= 0xff
@@ -2668,7 +2675,7 @@ class HandshakeConnection {
 	}
 
 	sendEMemTargeted(eMemNum: number, did: number, mode: number): CommandResult {
-		if (this.isClosing || this.mainHandshakeStage !== 9) {
+		if (!this.readyForCommands()) {
 			return { success: false, message: 'Not connected.' }
 		}
 		if (!Number.isInteger(eMemNum) || eMemNum < 0 || eMemNum > 999) {

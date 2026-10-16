@@ -143,6 +143,8 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	readonly ememButtons = new ButtonAssignments<{ target: string; register: number }>('emem_button_state')
 	readonly transitionButtons = new ButtonAssignments<{ target: string; transition: string }>('transition_button_state')
 	readonly suiteButtons = new Map<string, Map<string, SuiteButton>>()
+	// One PBUS sequence at a time per suite and PBUS device (see UpdateActions).
+	readonly pbusQueues = new Map<string, Promise<void>>()
 	private sourceRefreshTimer?: NodeJS.Timeout
 	private macroCatalogRefreshTimer?: NodeJS.Timeout
 	private macroFlashTimer?: NodeJS.Timeout

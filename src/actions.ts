@@ -162,7 +162,9 @@ export function UpdateActions(self: ModuleInstance): void {
 	// PBUS sequences are several frames 50 ms apart; two quick presses must not
 	// interleave (select PLAY, select STOP, fire, fire), so each suite and PBUS
 	// device runs one sequence at a time, in press order.
-	const pbusQueues = new Map<string, Promise<void>>()
+	// The queue lives on the module, so republishing these definitions (source names,
+	// macro catalog, config save) cannot reset it mid-sequence.
+	const pbusQueues = self.pbusQueues
 	const runPbusSequence = async (
 		e: { options: { suite?: unknown; pbus?: unknown } },
 		sequence: () => Promise<void>,

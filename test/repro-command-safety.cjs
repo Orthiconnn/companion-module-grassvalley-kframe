@@ -18,6 +18,7 @@ function connected() {
 		'test',
 	)
 	instance.mainHandshakeStage = 9
+	instance.fullyConnected = true
 	instance.protocol = 'udp'
 	instance.macroSendDelayMs = 0
 	const sent = []
