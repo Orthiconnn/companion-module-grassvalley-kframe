@@ -287,6 +287,17 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.updateActions()
 		this.updatePresets()
 		this.updateRuntimeState()
+		// The refresh timers cancelled above may have been due for a suite that stays
+		// connected; redraw their feedbacks now so no tally is left stale.
+		this.checkFeedbacks(
+			'aux_button_state',
+			'crosspoint_button_state',
+			'image_store_input_state',
+			'timeline_progress',
+			'transition_button_state',
+			'macro_button_state',
+			'action_label',
+		)
 		this.queueSelectedSuiteCascade()
 	}
 

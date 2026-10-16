@@ -169,7 +169,8 @@ export function UpdateActions(self: ModuleInstance): void {
 		e: { options: { suite?: unknown; pbus?: unknown } },
 		sequence: () => Promise<void>,
 	): Promise<void> => {
-		const key = `${requireSuiteId(e.options.suite)}:${String(e.options.pbus)}`
+		// Normalise the device number so 1, "1" and "01" share one queue.
+		const key = `${requireSuiteId(e.options.suite)}:${commandNumber(e.options.pbus)}`
 		const current = (pbusQueues.get(key) ?? Promise.resolve()).catch(() => undefined).then(sequence)
 		pbusQueues.set(key, current)
 		try {

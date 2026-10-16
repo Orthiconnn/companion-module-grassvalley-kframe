@@ -59,3 +59,54 @@ test('republishing actions mid-sequence does not let PBUS presses interleave', a
 		protocol.sendRawCommand = saved
 	}
 })
+
+test('PBUS 1 and "01" share one queue', async () => {
+	const module = new Module({ _isInstanceContext: true, id: 'pbusk' })
+	Object.assign(module, { updateStatus() {}, setVariableValues() {}, checkFeedbacks() {}, log() {} })
+	module.config = { host: '192.0.2.10', suite1: true }
+	let actions
+	module.setActionDefinitions = (defs) => (actions = defs)
+	UpdateActions(module)
+	const frames = []
+	const saved = protocol.sendRawCommand
+	protocol.sendRawCommand = (_id, command) => (frames.push(command.slice(8)), { success: true, message: '' })
+	try {
+		const play = actions.pbus_trigger.callback({ options: { suite: 'suite1a', pbus: 1, trigger: 0 } })
+		await new Promise((resolve) => setTimeout(resolve, 20))
+		const stop = actions.pbus_trigger.callback({ options: { suite: 'suite1a', pbus: ' 01', trigger: 1 } })
+		await Promise.all([play, stop])
+		assert.equal(frames.length, 8)
+		assert.equal(frames[3], frames[0], 'first sequence finished before the second started')
+	} finally {
+		protocol.sendRawCommand = saved
+	}
+})
+
+test('a config save redraws tally feedbacks for suites that stay connected', async () => {
+	const module = new Module({ _isInstanceContext: true, id: 'redraw' })
+	const checks = []
+	Object.assign(module, {
+		updateStatus() {},
+		setVariableValues() {},
+		log() {},
+		updateActions() {},
+		updatePresets() {},
+		checkFeedbacks: (...ids) => checks.push(...ids),
+	})
+	const config = { host: '192.0.2.10', suite1: true, maxRetries: 5 }
+	module.config = config
+	module.suiteStates.suite1a.status = 'connected'
+	module.connectSuite = async () => true
+	const saved = protocol.disconnectConnection
+	protocol.disconnectConnection = async () => {}
+	try {
+		module.updateRuntimeState() // first publish redraws everything; start from a settled state
+		checks.length = 0
+		await module.configUpdated({ ...config, maxRetries: 9 })
+		for (const id of ['transition_button_state', 'timeline_progress', 'aux_button_state', 'crosspoint_button_state'])
+			assert.ok(checks.includes(id), `${id} not redrawn`)
+	} finally {
+		protocol.disconnectConnection = saved
+		await module.destroy()
+	}
+})
