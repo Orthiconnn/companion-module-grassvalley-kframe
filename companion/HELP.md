@@ -6,7 +6,7 @@ This beta release ports the verified GV Macro Player Stream Deck v2026.3.0.0 pro
 
 ## Configuration
 
-Enter only the frame IP address. The local UDP ports are fixed in code and cannot be changed by the user: 6132/6133 for Suite 1, 6134/6135 for Suite 2, 6136/6137 for Suite 3, and 6138/6139 for Suite 4. Because the ports are fixed, use one connection of this module per Companion.
+The only network setting is the frame IP address. The local UDP ports are fixed in code and cannot be changed by the user: 6132/6133 for Suite 1, 6134/6135 for Suite 2, 6136/6137 for Suite 3, and 6138/6139 for Suite 4. Because the ports are fixed, use one connection of this module per Companion.
 
 Enter the frame IP, select any combination of Suites 1–4, and set the number of quick reconnection attempts. Selected suites connect automatically, one at a time, because the frame accepts one connection handshake from a computer at a time. If a suite cannot connect it waits its turn behind the other suites, retries 2 s apart for the configured number of quick attempts, then keeps retrying every 30 s until the frame answers. The protocol keepalive timing is fixed internally. Each suite's optional Connect / Disconnect button changes from red **Disconnected**, through amber **Connecting** (Establishing, then Handshake), to green **Connected**, and displays live heartbeat activity. Every operational action and feedback includes its own suite selection.
 

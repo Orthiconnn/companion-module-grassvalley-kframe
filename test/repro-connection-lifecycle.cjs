@@ -1,6 +1,7 @@
 // Run: npm run build && node --test test/repro-connection-lifecycle.cjs
 // Regression coverage for startup failures and cancellation at async boundaries.
-// All packets stay on loopback; no switcher or fixed service ports are used.
+// All packets stay on loopback; no switcher or fixed service ports are used
+// (TCP detection targets a local test server, never the default frame port 5000).
 const assert = require('node:assert/strict')
 const dgram = require('node:dgram')
 const { test } = require('node:test')
@@ -125,7 +126,12 @@ test('Cancelling during TCP detection must not open UDP sockets afterward', asyn
 
 // Real sockets: cancelling while detection/binding is pending must settle startup.
 test('TCP detection cancellation closes its socket and settles promptly', async () => {
+	// A local server that accepts and never answers, so detection stays pending
+	// without touching the default frame port 5000 on this machine.
+	const server = require('node:net').createServer((socket) => socket.on('error', () => {}))
+	await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
 	const instance = connection()
+	instance.initialServerPort = server.address().port
 	const pending = instance.tryTcpConnect().then(
 		() => 'resolved',
 		() => 'rejected',
@@ -137,6 +143,7 @@ test('TCP detection cancellation closes its socket and settles promptly', async 
 		assert.equal(socket.destroyed, true)
 	} finally {
 		dispose(instance)
+		server.close()
 	}
 })
 

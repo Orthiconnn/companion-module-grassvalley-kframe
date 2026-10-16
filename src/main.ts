@@ -519,6 +519,8 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 
 	async connectSuite(value: unknown, automatic = false, automaticGeneration?: number): Promise<boolean> {
 		const id = suiteId(value)
+		// A config save during this connect makes it stale, manual or automatic.
+		const generation = automaticGeneration ?? this.connectionConfigGeneration
 		if (!automatic) this.manuallyDisconnectedSuites.delete(id)
 		if (!this.config.host) {
 			this.reportedStatus = InstanceStatus.BadConfig
@@ -547,7 +549,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			if (
 				this.shuttingDown ||
 				this.manuallyDisconnectedSuites.has(id) ||
-				(automaticGeneration !== undefined && automaticGeneration !== this.connectionConfigGeneration)
+				generation !== this.connectionConfigGeneration
 			) {
 				await protocol.disconnectConnection(this.connectionId(id))
 				state.status = 'disconnected'

@@ -3,6 +3,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import net from 'node:net'
 import Module from '../dist/main.js'
 import { protocol } from '../dist/protocol.js'
 import { UpgradeScripts } from '../dist/upgrades.js'
@@ -106,6 +108,18 @@ test('manual Connect is not torn down by its own startup aux-state ERROR', async
 	const createConnection = protocol.createConnection
 	protocol.createConnection = (id, host, suite, _ports, ...rest) =>
 		createConnection(id, host, suite, { mainPort: 0, listenerPort: 0 }, ...rest)
+	// TCP detection goes to a closed local port (refused at once, so startup takes the
+	// UDP path as on a V14 frame), never the default frame port 5000 on this machine.
+	const server = net.createServer()
+	await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+	const closedPort = server.address().port
+	await new Promise((resolve) => server.close(resolve))
+	const HandshakeConnection = createRequire(import.meta.url)('../dist/protocol/handshake-connection-class.cjs')
+	const start = HandshakeConnection.prototype.start
+	HandshakeConnection.prototype.start = function () {
+		this.initialServerPort = closedPort
+		return start.call(this)
+	}
 	protocol.clientEmitter.on('status', module.handleProtocolStatus)
 	const startupErrors = []
 	const spy = (id, type, message) => type === 'ERROR' && startupErrors.push(message)
@@ -124,6 +138,7 @@ test('manual Connect is not torn down by its own startup aux-state ERROR', async
 	} finally {
 		protocol.clientEmitter.off('status', spy)
 		protocol.createConnection = createConnection
+		HandshakeConnection.prototype.start = start
 		await module.destroy()
 	}
 })

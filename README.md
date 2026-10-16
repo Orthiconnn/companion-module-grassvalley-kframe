@@ -1,12 +1,12 @@
-# Grass Valley KFrame Companion v2026.0.9.8
+# Grass Valley KFrame Companion v2026.0.9.9
 
 Major-version Bitfocus Companion implementation based on the Grass Valley Stream Deck application.
 
 ## Versioning
 
 - Module id: `grassvalley-kframe` (the next version of the existing Bitfocus K-Frame module)
-- Internal project version: `2026.0.9.8` (announced to the frame; `src/version.ts`, checked against package.json by `test/repro-version.mjs`)
-- Companion prerelease package version: `2026.0.9-beta.8` (SemVer)
+- Internal project version: `2026.0.9.9` (announced to the frame; `src/version.ts`, checked against package.json by `test/repro-version.mjs`)
+- Companion prerelease package version: `2026.0.9-beta.9` (SemVer)
 
 ## Source baseline
 
@@ -71,7 +71,11 @@ Validation on 2026-10-14: synthetic UDP and TCP packets reproduce the original s
 
 ## Checks
 
-All code is checked; nothing is excluded. `yarn build` type-checks every source file with strict TypeScript, including the protocol layer (`src/protocol/*.cts`, CommonJS TypeScript). `yarn lint` runs eslint on `src/` and `test/`, and `yarn prettier --check .` covers the whole repository. `yarn test` (also `npm test`) builds and runs every test. CI runs build, lint, formatting and the tests on every push.
+All code is checked; nothing is excluded. `yarn build` type-checks every source file with strict TypeScript, including the protocol layer (`src/protocol/*.cts`, CommonJS TypeScript). `yarn lint` runs eslint on `src/` and `test/`, and `yarn prettier --check .` covers every source, test, doc and config file (`package.json` keeps the package manager's own formatting). `yarn test` (also `npm test`) builds and runs every test. CI runs build, lint, formatting and the tests on every push.
+
+## 2026.0.9.9 safety checks
+
+An unknown Transition type is now rejected instead of firing an AUTO transition, and an unknown AUX transition is rejected instead of becoming a cut. A config save during a manual Connect now closes that stale connection at once. Tests no longer contact the default frame port 5000 on the test machine.
 
 ## 2026.0.9.8 checks everywhere
 

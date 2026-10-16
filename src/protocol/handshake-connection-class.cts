@@ -2368,9 +2368,11 @@ class HandshakeConnection {
 				case 'wipe':
 					transByte = 0x02
 					break
-				default:
+				case 'cut':
 					transByte = 0x00
 					break
+				default:
+					return { success: false, message: 'Invalid AUX transition (cut, mix or wipe).' }
 			}
 			const data = Buffer.alloc(4)
 			data.writeUInt16BE(sourceNum, 0)

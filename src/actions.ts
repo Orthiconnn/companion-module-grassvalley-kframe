@@ -93,6 +93,8 @@ function resultOrThrow(result: { success: boolean; message: string }): void {
 	if (!result.success) throw new Error(result.message)
 }
 
+const TRANSITION_EVENTS: Partial<Record<string, number>> = { cut: 0x44, auto: 0x43 }
+
 export function UpdateActions(self: ModuleInstance): void {
 	const p = self.protocol
 	const auxSourceChoices = self.sourceChoices(850)
@@ -377,7 +379,9 @@ export function UpdateActions(self: ModuleInstance): void {
 				const [me, bus] = String(e.options.target).split('_')
 				const index = ME_INDEXES[me]
 				if (index === undefined || !bus) throw new Error('Invalid transition target')
-				const eventId = String(e.options.transition) === 'cut' ? 0x44 : 0x43
+				// Reject anything else rather than firing an AUTO transition on air.
+				const eventId = TRANSITION_EVENTS[String(e.options.transition)]
+				if (eventId === undefined) throw new Error('Invalid transition type (cut or auto)')
 				if (bus === 'BOTH') {
 					resultOrThrow(p.sendTransitionEvent(id(e), eventId, 0x03000000 + index))
 					resultOrThrow(p.sendTransitionEvent(id(e), eventId, 0x03000010 + index))
