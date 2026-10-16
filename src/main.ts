@@ -5,7 +5,7 @@ import { UpgradeScripts } from './upgrades.js'
 import { UpdateActions, type ActionsSchema } from './actions.js'
 import { UpdateFeedbacks, type FeedbacksSchema } from './feedbacks.js'
 import { UpdatePresets } from './presets.js'
-import { protocol, type CommandResult } from './protocol.js'
+import { protocol } from './protocol.js'
 import { MODULE_BUILD_DATE, MODULE_VERSION } from './version.js'
 import type { DropdownChoice } from '@companion-module/base'
 
@@ -236,23 +236,27 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	}
 
 	async configUpdated(config: ModuleConfig): Promise<void> {
-		// Keep live suites up when a save does not affect them (same IP, still ticked),
-		// so ticking Suite 3 or changing the retry count does not drop Suite 1 on air.
+		// Keep live suites up when a save does not affect them, so ticking Suite 3 or
+		// changing the retry count does not drop Suite 1 on air. A suite reconnects
+		// only when the IP changes or this save unticks it; a suite connected with
+		// its Connect button (not ticked) stays connected too.
 		const previous = this.config
+		const sameHost = previous?.host === config.host
+		const unticked = (id: SuiteId): boolean =>
+			suiteEnabled(previous, suiteNumber(id)) && !suiteEnabled(config, suiteNumber(id))
 		const keep = new Set(
-			SUITES.filter(
-				(id) =>
-					previous?.host === config.host &&
-					suiteEnabled(previous, suiteNumber(id)) &&
-					suiteEnabled(config, suiteNumber(id)) &&
-					this.suiteStates[id].status === 'connected',
-			),
+			SUITES.filter((id) => sameHost && !unticked(id) && this.suiteStates[id].status === 'connected'),
 		)
 		const restart = SUITES.filter((id) => !keep.has(id))
 		this.shuttingDown = true
 		const generation = ++this.connectionConfigGeneration
 		this.config = config
-		this.manuallyDisconnectedSuites.clear()
+		// A suite the operator disconnected stays disconnected through an unrelated
+		// save; a new IP, or ticking that suite in this save, re-enables it.
+		if (!sameHost) this.manuallyDisconnectedSuites.clear()
+		for (const id of SUITES)
+			if (!suiteEnabled(previous, suiteNumber(id)) && suiteEnabled(config, suiteNumber(id)))
+				this.manuallyDisconnectedSuites.delete(id)
 		this.clearAutomaticRetries()
 		if (this.sourceRefreshTimer) {
 			clearTimeout(this.sourceRefreshTimer)
@@ -713,11 +717,6 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 
 	private clearAutomaticRetries(): void {
 		for (const id of SUITES) this.clearAutomaticRetry(id)
-	}
-
-	send(command: () => CommandResult): void {
-		const result = command()
-		if (!result.success) this.log('warn', result.message)
 	}
 
 	// Every labelled action records its button's assignment here; the matching

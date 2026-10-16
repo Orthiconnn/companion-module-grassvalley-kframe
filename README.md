@@ -75,7 +75,7 @@ All code is checked; nothing is excluded. `yarn build` type-checks every source 
 
 ## 2026.0.9 release review
 
-Commands for an unknown suite (a typo, or an expression returning `2` or `Suite 2`) are rejected instead of acting on Suite 1. Saving the configuration keeps suites that are live and unaffected (same IP, still ticked) connected; only suites whose IP or selection changed reconnect. A late UDP handshake send callback after a disconnect no longer throws. A failed TCP detection releases its socket immediately.
+Commands for an unknown suite (a typo, or an expression returning `2` or `Suite 2`) are rejected instead of acting on Suite 1. Saving the configuration keeps live suites connected unless the IP changes or the save unticks them. A late UDP handshake send callback after a disconnect no longer throws. Action targets must be one of the action's own choices and numbers must be plain whole numbers, so a malformed or blank value is rejected instead of becoming a live default. PBUS Recall and Trigger sequences run one at a time per suite and PBUS device. A config save also keeps suites connected with their Connect button, and a suite the operator disconnected stays disconnected unless the IP changes or the save ticks it. A failed TCP detection releases its socket immediately.
 
 ## 2026.0.9.9 safety checks
 

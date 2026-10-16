@@ -61,6 +61,11 @@ const timelineRunTargetChoices = [
 	),
 	...['PRI', 'SEC', 'BOTH'].map((mode) => ({ id: `eDPM-${mode}`, label: `eDPM ${mode}` })),
 ]
+const CROSSPOINT_TARGETS = choiceIds(crosspointChoices)
+const TRANSITION_TARGETS = choiceIds(transitionChoices)
+const EMEM_TARGETS = choiceIds(ememChoices)
+const TIMELINE_TARGETS = choiceIds(timelineTargetChoices)
+const RUN_TARGETS = choiceIds(timelineRunTargetChoices)
 const timelineCommands: Record<string, { eid: number; data: number[] }> = {
 	previous: { eid: 0x006b, data: [0x01, 0xff, 0xff] },
 	next: { eid: 0x006b, data: [0x01, 0x00, 0x01] },
@@ -73,7 +78,22 @@ const timelineCommands: Record<string, { eid: number; data: number[] }> = {
 	mod_all_absolute: { eid: 0x006d, data: [0x02] },
 }
 
-// Empty, zero or non-numeric options fall back to the action's first value.
+// Commands accept only a finite number or a plain decimal string. Anything else
+// (blank, null, true, "0x10", "12.5") becomes NaN, which every command rejects,
+// instead of a live value such as E-MEM 0 or Macro 1.
+const commandNumber = (value: unknown): number =>
+	typeof value === 'number' ? value : typeof value === 'string' && /^\s*\d+\s*$/.test(value) ? Number(value) : NaN
+// Dropdown targets must be exactly one of the action's own choices.
+function choiceIds(choices: readonly { id: string }[]): ReadonlySet<string> {
+	return new Set(choices.map((choice) => choice.id))
+}
+const requireChoice = (value: unknown, allowed: ReadonlySet<string>, what: string): string => {
+	const text = String(value)
+	if (!allowed.has(text)) throw new Error(`Invalid ${what} ${JSON.stringify(value)}`)
+	return text
+}
+
+// Display only: empty, zero or non-numeric options fall back to the action's first value.
 const optionNumber = (value: unknown, fallback = 1): number => Number(value) || fallback
 const pbusValue = (value: unknown): number => {
 	const number = Number(value)
@@ -139,6 +159,23 @@ export function UpdateActions(self: ModuleInstance): void {
 	const connectInBackground = (suite: unknown): void => {
 		self.connectSuite(suite).catch((error: unknown) => self.log('warn', `Connect failed: ${String(error)}`))
 	}
+	// PBUS sequences are several frames 50 ms apart; two quick presses must not
+	// interleave (select PLAY, select STOP, fire, fire), so each suite and PBUS
+	// device runs one sequence at a time, in press order.
+	const pbusQueues = new Map<string, Promise<void>>()
+	const runPbusSequence = async (
+		e: { options: { suite?: unknown; pbus?: unknown } },
+		sequence: () => Promise<void>,
+	): Promise<void> => {
+		const key = `${requireSuiteId(e.options.suite)}:${String(e.options.pbus)}`
+		const current = (pbusQueues.get(key) ?? Promise.resolve()).catch(() => undefined).then(sequence)
+		pbusQueues.set(key, current)
+		try {
+			await current
+		} finally {
+			if (pbusQueues.get(key) === current) pbusQueues.delete(key)
+		}
+	}
 	const suiteSubscription: {
 		optionsToMonitorForSubscribe: ('suite' | 'textSize' | 'showSuite')[]
 		subscribe: (action: { id: string; controlId: string; options: SuiteOption }) => void
@@ -197,7 +234,7 @@ export function UpdateActions(self: ModuleInstance): void {
 			subscribe: (action) => self.trackButton(self.macroButtons, action, { macro: optionNumber(action.options.value) }),
 			unsubscribe: (action) => self.untrackButton(self.macroButtons, action),
 			callback: (e) => {
-				const macro = Number(e.options.value)
+				const macro = commandNumber(e.options.value)
 				resultOrThrow(p.sendMacro(id(e), macro))
 				self.setVariableValues({ last_macro: macro })
 			},
@@ -224,7 +261,7 @@ export function UpdateActions(self: ModuleInstance): void {
 			subscribe: (action) =>
 				self.trackButton(self.actionLabelButtons, action, actionLabel('macro_stop', action.options)),
 			unsubscribe: (action) => self.untrackButton(self.actionLabelButtons, action),
-			callback: (e) => resultOrThrow(p.sendMacroStop(id(e), Number(e.options.value))),
+			callback: (e) => resultOrThrow(p.sendMacroStop(id(e), commandNumber(e.options.value))),
 		},
 		macro_stop_all: {
 			name: 'Macro: Stop All',
@@ -270,8 +307,8 @@ export function UpdateActions(self: ModuleInstance): void {
 				showSuiteOption,
 			],
 			callback: (e) => {
-				const aux = Number(e.options.aux),
-					source = Number(e.options.source)
+				const aux = commandNumber(e.options.aux),
+					source = commandNumber(e.options.source)
 				resultOrThrow(p.sendAuxRoute(id(e), aux, source, String(e.options.transition)))
 				self.setVariableValues({ last_aux: aux, last_aux_source: source })
 			},
@@ -303,7 +340,7 @@ export function UpdateActions(self: ModuleInstance): void {
 				showSuiteOption,
 			],
 			callback: (e) => {
-				const [me, bus] = String(e.options.target).split('_')
+				const [me, bus] = requireChoice(e.options.target, CROSSPOINT_TARGETS, 'crosspoint target').split('_')
 				if (typeof e.options.source !== 'number' && typeof e.options.source !== 'string')
 					throw new Error('Invalid source number (must be a whole number from 1-809).')
 				const index = ME_INDEXES[me]
@@ -316,7 +353,7 @@ export function UpdateActions(self: ModuleInstance): void {
 						id(e),
 						key ? 0x103a : 0x104a,
 						(key ? 0x08000000 : 0x04000000) + offset + index,
-						Number(e.options.source),
+						commandNumber(e.options.source),
 					),
 				)
 			},
@@ -339,8 +376,8 @@ export function UpdateActions(self: ModuleInstance): void {
 				showSuiteOption,
 			],
 			callback: (e) => {
-				const target = String(e.options.target),
-					register = Number(e.options.register)
+				const target = requireChoice(e.options.target, EMEM_TARGETS, 'E-MEM target'),
+					register = commandNumber(e.options.register)
 				if (target === 'MASTER') return resultOrThrow(p.sendEMem(id(e), register))
 				const [me, modeName] = target.split('-')
 				const index = me === 'eDPM' ? 10 : ME_INDEXES[me]
@@ -376,7 +413,7 @@ export function UpdateActions(self: ModuleInstance): void {
 				}),
 			unsubscribe: (action) => self.untrackButton(self.transitionButtons, action),
 			callback: (e) => {
-				const [me, bus] = String(e.options.target).split('_')
+				const [me, bus] = requireChoice(e.options.target, TRANSITION_TARGETS, 'transition target').split('_')
 				const index = ME_INDEXES[me]
 				if (index === undefined || !bus) throw new Error('Invalid transition target')
 				// Reject anything else rather than firing an AUTO transition on air.
@@ -407,7 +444,7 @@ export function UpdateActions(self: ModuleInstance): void {
 			subscribe: (action) =>
 				self.trackButton(self.panelMemoryButtons, action, { register: optionNumber(action.options.value) }),
 			unsubscribe: (action) => self.untrackButton(self.panelMemoryButtons, action),
-			callback: (e) => resultOrThrow(p.sendPanelMem(id(e), Number(e.options.value))),
+			callback: (e) => resultOrThrow(p.sendPanelMem(id(e), commandNumber(e.options.value))),
 		},
 		image_store: {
 			name: 'Image Store: Select Image',
@@ -426,7 +463,8 @@ export function UpdateActions(self: ModuleInstance): void {
 					image: optionNumber(action.options.image),
 				}),
 			unsubscribe: (action) => self.untrackButton(self.imageStoreButtons, action),
-			callback: (e) => resultOrThrow(p.sendImageStore(id(e), Number(e.options.output), Number(e.options.image))),
+			callback: (e) =>
+				resultOrThrow(p.sendImageStore(id(e), commandNumber(e.options.output), commandNumber(e.options.image))),
 		},
 		image_store_input: {
 			name: 'Image Store: Select Input',
@@ -450,7 +488,7 @@ export function UpdateActions(self: ModuleInstance): void {
 			subscribe: (action) =>
 				self.trackButton(self.imageStoreInputButtons, action, { source: optionNumber(action.options.value) }),
 			unsubscribe: (action) => self.untrackButton(self.imageStoreInputButtons, action),
-			callback: (e) => resultOrThrow(p.sendImageStoreInput(id(e), Number(e.options.value))),
+			callback: (e) => resultOrThrow(p.sendImageStoreInput(id(e), commandNumber(e.options.value))),
 		},
 		raw_cpl: {
 			name: 'Advanced: Send Raw CPL',
@@ -476,7 +514,7 @@ export function UpdateActions(self: ModuleInstance): void {
 			subscribe: (action) => self.trackButton(self.actionLabelButtons, action, actionLabel('run', action.options)),
 			unsubscribe: (action) => self.untrackButton(self.actionLabelButtons, action),
 			callback: (e) => {
-				const target = String(e.options.target)
+				const target = requireChoice(e.options.target, RUN_TARGETS, 'timeline RUN target')
 				const [engine, partition] = target.split('-')
 				const did = target === 'MASTER' ? 0x35000001 : 0x02000000 + (engine === 'eDPM' ? 10 : ME_INDEXES[engine])
 				if (!Number.isInteger(did)) throw new Error('Invalid timeline RUN target')
@@ -519,7 +557,7 @@ export function UpdateActions(self: ModuleInstance): void {
 			callback: (e) => {
 				const command = timelineCommands[String(e.options.command)]
 				if (!command) throw new Error('Invalid timeline command')
-				const target = String(e.options.target)
+				const target = requireChoice(e.options.target, TIMELINE_TARGETS, 'timeline target')
 				const did = target === 'MASTER' ? 0x35000001 : 0x02000000 + (target === 'eDPM' ? 10 : ME_INDEXES[target])
 				if (!Number.isInteger(did)) throw new Error('Invalid timeline target')
 				resultOrThrow(p.sendTimelineEvent(id(e), command.eid, did, command.data))
@@ -537,7 +575,7 @@ export function UpdateActions(self: ModuleInstance): void {
 			optionsToMonitorForSubscribe: ['suite', 'value', 'labelOverride', 'textSize', 'showSuite'],
 			subscribe: (action) => self.trackButton(self.gpiButtons, action, { gpi: optionNumber(action.options.value) }),
 			unsubscribe: (action) => self.untrackButton(self.gpiButtons, action),
-			callback: (e) => resultOrThrow(p.sendRawCommand(id(e), buildGpi(Number(e.options.value)))),
+			callback: (e) => resultOrThrow(p.sendRawCommand(id(e), buildGpi(commandNumber(e.options.value)))),
 		},
 		pbus_recall: {
 			name: 'PBUS: Recall Register',
@@ -558,10 +596,12 @@ export function UpdateActions(self: ModuleInstance): void {
 				}),
 			unsubscribe: (action) => self.untrackButton(self.pbusButtons, action),
 			callback: async (e) => {
-				const commands = buildPbusRecall(Number(e.options.pbus), Number(e.options.register))
-				resultOrThrow(p.sendRawCommand(id(e), commands[0]))
-				await new Promise((resolve) => setTimeout(resolve, 50))
-				resultOrThrow(p.sendRawCommand(id(e), commands[1]))
+				await runPbusSequence(e, async () => {
+					const commands = buildPbusRecall(commandNumber(e.options.pbus), commandNumber(e.options.register))
+					resultOrThrow(p.sendRawCommand(id(e), commands[0]))
+					await new Promise((resolve) => setTimeout(resolve, 50))
+					resultOrThrow(p.sendRawCommand(id(e), commands[1]))
+				})
 			},
 		},
 		pbus_trigger: {
@@ -591,11 +631,16 @@ export function UpdateActions(self: ModuleInstance): void {
 				}),
 			unsubscribe: (action) => self.untrackButton(self.pbusButtons, action),
 			callback: async (e) => {
-				const [clear, select, fire] = buildPbusTrigger(Number(e.options.pbus), Number(e.options.trigger))
-				for (const command of [clear, select, fire, clear]) {
-					resultOrThrow(p.sendRawCommand(id(e), command))
-					await new Promise((resolve) => setTimeout(resolve, 50))
-				}
+				await runPbusSequence(e, async () => {
+					const [clear, select, fire] = buildPbusTrigger(
+						commandNumber(e.options.pbus),
+						commandNumber(e.options.trigger),
+					)
+					for (const command of [clear, select, fire, clear]) {
+						resultOrThrow(p.sendRawCommand(id(e), command))
+						await new Promise((resolve) => setTimeout(resolve, 50))
+					}
+				})
 			},
 		},
 		button_mapping: {
@@ -656,9 +701,9 @@ export function UpdateActions(self: ModuleInstance): void {
 						id(e),
 						buildButtonMapping(
 							String(e.options.bus),
-							Number(e.options.shift),
-							Number(e.options.button),
-							Number(e.options.source),
+							commandNumber(e.options.shift),
+							commandNumber(e.options.button),
+							commandNumber(e.options.source),
 						),
 					),
 				),
