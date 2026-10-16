@@ -1,28 +1,28 @@
-# Grass Valley Kayenne
+# Grass Valley KFrame
 
-Companion module by Brad Shaffer / Orthicon for controlling Grass Valley Kayenne production switchers through the CPL protocol.
+Companion module by Brad Shaffer / Orthicon for controlling Grass Valley K-Frame production switchers (Kayenne, Karrera, Korona) through the CPL protocol.
 
-This development release ports the verified GV Macro Player Stream Deck v2026.3.0.0 protocol engine to Companion.
+This beta release ports the verified GV Macro Player Stream Deck v2026.3.0.0 protocol engine to Companion.
 
 ## Configuration
 
 Enter only the frame IP address. Ports are fixed in code and cannot be changed by the user: 6132/6133 for Suite 1, 6134/6135 for Suite 2, 6136/6137 for Suite 3, and 6138/6139 for Suite 4.
 
-Enter the frame IP, select any combination of Suites 1–4, and set the maximum reconnection attempts. Selected suites connect automatically and sequentially: each suite completes its connection and handshake before the next begins. The protocol keepalive timing is fixed internally. Each suite's optional Connect / Disconnect button changes from red **Not Connected**, through amber **Connecting / Establishing Heartbeat**, to green **Connected**, and displays live heartbeat activity. Every operational action and feedback includes its own suite selection.
+Enter the frame IP, select any combination of Suites 1–4, and set the number of quick reconnection attempts. Selected suites connect automatically, one at a time, because the frame accepts one connection handshake from a computer at a time. If a suite cannot connect it waits its turn behind the other suites, retries 2 s apart for the configured number of quick attempts, then keeps retrying every 30 s until the frame answers. The protocol keepalive timing is fixed internally. Each suite's optional Connect / Disconnect button changes from red **Disconnected**, through amber **Connecting** (Establishing, then Handshake), to green **Connected**, and displays live heartbeat activity. Every operational action and feedback includes its own suite selection.
 
 ### Upgrading from Grass Valley K-Frame 1.0.0
 
-Existing Macro Recall and AUX Route actions are migrated to the Kayenne action format, including their selected suite, numeric values, and Companion expressions/variables. Their former send-pulse feedbacks are replaced with Kayenne's live frame-name and button-tally feedbacks. The old connection's IP address is preserved.
+This module is the next version of the Grass Valley K-Frame module, so existing connections update in place. Existing Macro Recall and AUX Route actions are migrated to the new action format, including their selected suite, numeric values, and Companion expressions/variables. Their former send-pulse feedbacks are replaced with live frame-name and button-tally feedbacks. The connection's IP address is preserved, and the `last_macro`, `last_aux` and `last_aux_source` variables are still published.
 
-K-Frame 1.0.0's configured suite is preserved as the initially selected Kayenne suite. Additional suites can be enabled with the Suite 1–4 checkboxes. The optional **Suite Connect / Disconnect** presets provide manual control without changing the configured startup selection.
+K-Frame 1.0.0's configured suite is preserved as the initially selected suite. Additional suites can be enabled with the Suite 1–4 checkboxes. The optional **Suite Connect / Disconnect** presets provide manual control without changing the configured startup selection.
 
-The upgrade runs automatically when Companion loads the renamed module; users do not run a separate migration command. Imported-page testing confirms that existing page positions and supported Macro/AUX action values are preserved. Companion upgrade scripts cannot replace an existing button's layered artwork, so legacy buttons keep their former visual layout. Add a new Kayenne preset when the full suite badge, automatic frame-name label, and tally styling are desired.
+The upgrade runs automatically when Companion loads the new version; users do not run a separate migration command. Existing page positions and supported Macro/AUX action values are preserved. Companion upgrade scripts cannot replace an existing button's layered artwork, so upgraded buttons keep their former look. Add a new preset when the full suite badge, automatic frame-name label, and tally styling are desired.
 
 ## Controls
 
-The first iteration includes native actions for connection, macros, AUX routing, crosspoints, E-MEM, transitions, panel memory, Image Store, timeline RUN, GPI, PBUS recall/trigger, and panel button mapping. An advanced raw-CPL action is included for engineering and protocol testing.
+Native actions cover connection, macros, AUX routing, crosspoints, E-MEM, transitions, panel memory, Image Store, timeline RUN, GPI, PBUS recall/trigger, and panel button mapping. An advanced raw-CPL action is included for engineering and protocol testing.
 
-Connection and macro-active feedbacks, connection variables, and Stream Deck-inspired defaults are included for Macro 1–8, AUX 1–4, E-MEM, Image Store, RUN, recall, trigger, and GPI workflows. This build has passed local byte-vector, TypeScript, lint, package, Companion loading, and V14/V18 simulator checks. Continue testing on a non-air system before production use.
+Connection and macro-active feedbacks, connection variables, and Stream Deck-inspired defaults are included for Macro 1–8, AUX 1–4, E-MEM, Image Store, RUN, recall, trigger, and GPI workflows. This build has been tested against V14 and V18 frame simulators. Continue testing on a non-air system before production use.
 
 New preset buttons use **Border when pressed**. Their status icons follow Companion's global button-appearance setting; set that global option to **Show all** when all button status icons should always be visible.
 
@@ -45,3 +45,5 @@ Button Mapping changes the switcher panel mapping. PBUS Trigger sends a clear/se
 This Companion module is the substantially expanded successor to Brad Shaffer's original Grass Valley Stream Deck integration, first published by Orthicon in 2025. The connection and protocol implementation was originally developed by Brad Shaffer for interoperability with Grass Valley production-switching systems. No Grass Valley source code, firmware, binaries, or proprietary documentation are distributed with this module.
 
 This software is not affiliated with or endorsed by Grass Valley®. Grass Valley® is a registered trademark of its respective owner. The User agrees to indemnify and hold harmless the Developer from all claims, damages, or liabilities arising from use of this Software with any Grass Valley® hardware or systems.
+
+Thanks to: Seth Madway (testing)

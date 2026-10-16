@@ -1,11 +1,12 @@
-# Grass Valley Kayenne Companion v2026.0.9.4
+# Grass Valley KFrame Companion v2026.0.9.5
 
 Major-version Bitfocus Companion implementation based on the Grass Valley Stream Deck application.
 
 ## Versioning
 
-- Internal project version: `2026.0.9.4`
-- Companion prerelease package version: `2026.0.9-beta.4` (SemVer)
+- Module id: `grassvalley-kframe` (the next version of the existing Bitfocus K-Frame module)
+- Internal project version: `2026.0.9.5` (announced to the frame; `src/version.ts`, checked against package.json by `test/repro-version.mjs`)
+- Companion prerelease package version: `2026.0.9-beta.5` (SemVer)
 
 ## Source baseline
 
@@ -17,13 +18,13 @@ Major-version Bitfocus Companion implementation based on the Grass Valley Stream
 
 This module is substantially complete and is being released initially as a beta while live-system testing continues. It has been exercised against Grass Valley V14 and V18 frame simulators across Suites 1–4.
 
-The release is prepared as the upgrade successor to `grassvalley-kframe` 1.0.0. Its permanent upgrade script converts the former Macro/AUX action schemas, send-pulse feedbacks, configuration, and variable/expression values. `grassvalley-kframe` is retained in the manifest as a legacy module ID so Companion can carry existing installations into the renamed Kayenne module.
+The release is prepared as the next version of `grassvalley-kframe` (1.0.0 is the current Bitfocus release) and keeps its module id. grassvalley-kframe 1.0.0 shipped no upgrade scripts, so every script here runs on its connections. The permanent upgrade script converts the former Macro/AUX action schemas, send-pulse feedbacks, configuration, and variable/expression values.
 
-Upgrade testing with an imported K-Frame page confirms that Companion automatically preserves the existing page and button locations while translating supported Macro/AUX actions and their options to Kayenne. Companion's upgrade API does not redesign existing layered button artwork, so legacy buttons retain their existing visual layout; users can apply a Kayenne preset when they want the new suite badge, dynamic frame-name label, and tally presentation.
+Upgrade testing with an imported K-Frame page confirms that Companion automatically preserves the existing page and button locations while translating supported Macro/AUX actions and their options to the new format. Companion's upgrade API does not redesign existing layered button artwork, so legacy buttons retain their existing visual layout; users can apply a new preset when they want the new suite badge, dynamic frame-name label, and tally presentation.
 
-Kayenne automatically connects the suites selected in its configuration, one at a time in suite order, with a configurable maximum number of reconnection attempts. Existing Suite Connect / Disconnect button actions remain available for live manual control. Turning off Companion's master connection switch immediately clears all suite connections and their status feedback.
+The module automatically connects the suites selected in its configuration, one at a time (the frame accepts one handshake per client at a time). A suite that fails re-queues behind the others, retries 2 s apart for the configured number of quick attempts, then retries every 30 s indefinitely. Existing Suite Connect / Disconnect button actions remain available for live manual control. Turning off Companion's master connection switch immediately clears all suite connections and their status feedback.
 
-New Kayenne preset buttons default to Companion's **Border when pressed** decoration. Status icons follow Companion's global button setting because the current module preset API does not expose a per-preset status-icon default.
+New preset buttons default to Companion's **Border when pressed** decoration. Status icons follow Companion's global button setting because the current module preset API does not expose a per-preset status-icon default.
 
 ## Required UDP ports
 

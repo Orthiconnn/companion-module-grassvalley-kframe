@@ -77,7 +77,7 @@ test('send failures are reported as non-fatal WARNING, not ERROR', () => {
 test('a WARNING on a connected suite keeps it connected and queues no reconnect', async () => {
 	const { module } = setup({ host: '192.0.2.10', suite1: true })
 	let reconnects = 0
-	module.connectAutomaticallyWithRetries = async () => {
+	module.connectAutomatically = async () => {
 		reconnects++
 	}
 	module.suiteStates.suite1a.status = 'connected'
@@ -90,7 +90,7 @@ test('a WARNING on a connected suite keeps it connected and queues no reconnect'
 test('a fatal ERROR on a connected suite still disconnects and reconnects', async () => {
 	const { module } = setup({ host: '192.0.2.10', suite1: true })
 	let reconnects = 0
-	module.connectAutomaticallyWithRetries = async () => {
+	module.connectAutomatically = async () => {
 		reconnects++
 	}
 	module.suiteStates.suite1a.status = 'connected'
@@ -108,7 +108,7 @@ test('manual Connect is not torn down by its own startup aux-state ERROR', async
 	const spy = (id, type, message) => type === 'ERROR' && startupErrors.push(message)
 	protocol.clientEmitter.on('status', spy)
 	let reconnects = 0
-	module.connectAutomaticallyWithRetries = async () => {
+	module.connectAutomatically = async () => {
 		reconnects++
 	}
 	try {
@@ -176,9 +176,10 @@ test('empty host stops the automatic retry loop after one attempt', async () => 
 		return connect(...args)
 	}
 	const started = Date.now()
-	await module.connectAutomaticallyWithRetries('suite1a', module.connectionConfigGeneration)
+	await module.connectAutomatically('suite1a', module.connectionConfigGeneration)
 	assert.equal(attempts, 1)
 	assert.ok(Date.now() - started < 500, 'retry loop waited between attempts')
 	assert.equal(statuses.at(-1)[1], 'Target IP is required')
 	assert.ok(!logs.some((m) => m.includes('maximum reconnection attempts')), 'misleading max-attempts warning')
+	assert.equal(module.automaticRetryTimers.size, 0, 'retry scheduled without an IP')
 })

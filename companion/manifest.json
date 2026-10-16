@@ -1,14 +1,14 @@
 {
 	"$schema": "../node_modules/@companion-module/base/assets/manifest.schema.json",
 	"type": "connection",
-	"id": "grassvalley-kayenne",
-	"name": "Grass Valley Kayenne",
-	"shortname": "GV Kayenne",
-	"description": "Control Grass Valley Kayenne production switchers using the CPL protocol",
+	"id": "grassvalley-kframe",
+	"name": "Grass Valley KFrame",
+	"shortname": "GV KFrame",
+	"description": "Control Grass Valley K-Frame production switchers (Kayenne, Karrera, Korona) using the CPL protocol",
 	"version": "0.0.0",
 	"license": "MIT",
-	"repository": "git+https://github.com/bitfocus/companion-module-grassvalley-kayenne.git",
-	"bugs": "https://github.com/bitfocus/companion-module-grassvalley-kayenne/issues",
+	"repository": "git+https://github.com/bitfocus/companion-module-grassvalley-kframe.git",
+	"bugs": "https://github.com/bitfocus/companion-module-grassvalley-kframe/issues",
 	"maintainers": [
 		{
 			"name": "Brad Shaffer (@orthicon)"
@@ -20,7 +20,7 @@
 		"apiVersion": "0.0.0",
 		"entrypoint": "../dist/main.js"
 	},
-	"legacyIds": ["grassvalley-kframe"],
+	"legacyIds": [],
 	"manufacturer": "Grass Valley",
 	"products": ["Kayenne", "K-Frame", "X-Frame", "XP-Frame"],
 	"keywords": ["switcher", "video", "broadcast", "CPL", "macro", "crosspoint"]

@@ -42,7 +42,8 @@ export function GetConfigFields(): SomeCompanionConfigField[] {
 		{
 			type: 'number',
 			id: 'maxRetries',
-			label: 'Max Reconnection Attempts',
+			label: 'Quick Reconnection Attempts',
+			tooltip: 'Attempts 2 s apart after a suite drops. After these, the module keeps trying every 30 s.',
 			width: 4,
 			default: DEFAULT_MAX_RETRIES,
 			min: 0,

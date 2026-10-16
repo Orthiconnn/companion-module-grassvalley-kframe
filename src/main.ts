@@ -6,9 +6,12 @@ import { UpdateActions, type ActionsSchema } from './actions.js'
 import { UpdateFeedbacks, type FeedbacksSchema } from './feedbacks.js'
 import { UpdatePresets } from './presets.js'
 import { protocol, type CommandResult } from './protocol.js'
+import { MODULE_BUILD_DATE, MODULE_VERSION } from './version.js'
 import type { DropdownChoice } from '@companion-module/base'
 
 export const SUITES = ['suite1a', 'suite2a', 'suite3a', 'suite4a'] as const
+const FAST_RETRY_MS = 2000
+const SLOW_RETRY_MS = 30000
 export type SuiteId = (typeof SUITES)[number]
 export type SuiteState = {
 	status: string
@@ -145,6 +148,9 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	private readonly suiteDisconnects = new Map<SuiteId, Promise<void>>()
 	private readonly automaticConnectInProgress = new Set<SuiteId>()
 	private readonly automaticConnectQueued = new Set<SuiteId>()
+	private readonly automaticAttempts = new Map<SuiteId, number>()
+	private readonly automaticRetryTimers = new Map<SuiteId, NodeJS.Timeout>()
+	private publishedRuntimeState = ''
 	private readonly suiteStatusWaiters = new Set<() => void>()
 	private connectionConfigGeneration = 0
 	private shuttingDown = false
@@ -179,7 +185,11 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.queueSelectedSuiteCascade()
 		this.macroFlashTimer = setInterval(() => {
 			this.macroFlashOn = !this.macroFlashOn
-			this.checkFeedbacks('macro_button_state')
+			// Only paused macros flash; skip the redraw when none is paused.
+			const paused = SUITES.some((suite) =>
+				Object.values(protocol.getMacroRunState(this.connectionId(suite))?.macroStatus ?? {}).includes(7),
+			)
+			if (paused) this.checkFeedbacks('macro_button_state')
 		}, 500)
 		this.timelinePulseTimer = setInterval(() => {
 			const paused = SUITES.some((suite) => (protocol.getTimelineState(this.connectionId(suite))?.pauseState ?? 0) > 0)
@@ -193,6 +203,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.shuttingDown = true
 		this.connectionConfigGeneration++
 		this.manuallyDisconnectedSuites.clear()
+		this.clearAutomaticRetries()
 		for (const state of Object.values(this.suiteStates)) if (state.timer) clearTimeout(state.timer)
 		for (const id of SUITES)
 			this.suiteStates[id] = { status: 'disconnected', frameVersion: '', protocolName: '', heartbeatFlash: false }
@@ -219,6 +230,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		const generation = ++this.connectionConfigGeneration
 		this.config = config
 		this.manuallyDisconnectedSuites.clear()
+		this.clearAutomaticRetries()
 		if (this.sourceRefreshTimer) {
 			clearTimeout(this.sourceRefreshTimer)
 			this.sourceRefreshTimer = undefined
@@ -400,6 +412,8 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 				state.heartbeatFlash = false
 				this.checkFeedbacks('connection_state')
 			}, 300)
+			// The flash is the only change; skip the full runtime refresh below.
+			return
 		} else if (type === 'MACRO_CATALOG_READY') {
 			this.updateActions()
 			this.updatePresets()
@@ -446,6 +460,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 				}
 			}
 			this.frameMacroStates.set(connectionId, current)
+			this.checkFeedbacks('macro_active', 'macro_button_state', 'action_label')
 			if ('lastPlayedMacro' in message) {
 				const macro = Number(message.lastPlayedMacro)
 				if (Number.isFinite(macro) && macro > 0 && this.frameLastPlayedMacros.get(connectionId) !== macro) {
@@ -518,8 +533,8 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 				id,
 				{ mainPort, listenerPort },
 				`Suite ${suiteNumber(id)}`,
-				'2026.0.9.4',
-				'Oct 15 2026',
+				MODULE_VERSION,
+				MODULE_BUILD_DATE,
 			)
 			if (
 				this.shuttingDown ||
@@ -574,6 +589,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	async disconnectSuite(value: unknown): Promise<void> {
 		const id = suiteId(value)
 		this.manuallyDisconnectedSuites.add(id)
+		this.clearAutomaticRetry(id)
 		const closing = (async () => {
 			await protocol.disconnectConnection(this.connectionId(id))
 			this.suiteStates[id] = { status: 'disconnected', frameVersion: '', protocolName: '', heartbeatFlash: false }
@@ -597,53 +613,71 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	}
 
 	private queueSelectedSuiteCascade(): void {
-		const selected = SUITES.filter((id) => this.isSuiteSelected(id))
-		const generation = this.connectionConfigGeneration
-		this.automaticConnectChain = this.automaticConnectChain.then(async () => {
-			for (const id of selected) {
-				if (generation !== this.connectionConfigGeneration) return
-				if (this.shuttingDown || !this.isSuiteSelected(id) || this.manuallyDisconnectedSuites.has(id)) continue
-				await this.connectAutomaticallyWithRetries(id, generation)
-			}
-		})
+		for (const id of SUITES) if (this.isSuiteSelected(id)) this.queueAutomaticConnect(id)
 	}
 
+	// Suites connect one at a time because the frame handles one handshake per
+	// client at a time. A failed attempt re-queues behind the other suites, so one
+	// unreachable suite cannot hold the rest back.
 	private queueAutomaticConnect(id: SuiteId): void {
-		if (this.automaticConnectQueued.has(id)) return
+		if (this.automaticConnectQueued.has(id) || this.automaticRetryTimers.has(id)) return
 		this.automaticConnectQueued.add(id)
 		const generation = this.connectionConfigGeneration
 		this.automaticConnectChain = this.automaticConnectChain.then(async () => {
 			try {
-				if (
-					generation !== this.connectionConfigGeneration ||
-					this.shuttingDown ||
-					!this.isSuiteSelected(id) ||
-					this.manuallyDisconnectedSuites.has(id)
-				)
-					return
-				await this.connectAutomaticallyWithRetries(id, generation)
+				await this.connectAutomatically(id, generation)
 			} finally {
 				this.automaticConnectQueued.delete(id)
 			}
 		})
 	}
 
-	private async connectAutomaticallyWithRetries(id: SuiteId, generation: number): Promise<void> {
-		const retries = maximumRetries(this.config)
-		for (let attempt = 0; attempt <= retries; attempt++) {
-			if (
-				generation !== this.connectionConfigGeneration ||
-				this.shuttingDown ||
-				!this.isSuiteSelected(id) ||
-				this.manuallyDisconnectedSuites.has(id)
-			)
-				return
-			if (await this.connectSuite(id, true, generation)) return
-			// Missing IP is a config error; retrying cannot succeed until configUpdated().
-			if (!this.config.host) return
-			if (attempt < retries) await new Promise((resolve) => setTimeout(resolve, 2000))
+	private shouldConnectAutomatically(id: SuiteId, generation: number): boolean {
+		return (
+			generation === this.connectionConfigGeneration &&
+			!this.shuttingDown &&
+			this.isSuiteSelected(id) &&
+			!this.manuallyDisconnectedSuites.has(id)
+		)
+	}
+
+	// One attempt. On failure, retry after FAST_RETRY_MS for the configured number
+	// of reconnection attempts, then keep trying every SLOW_RETRY_MS so a frame
+	// that comes back after a long outage is picked up without a button press.
+	private async connectAutomatically(id: SuiteId, generation: number): Promise<void> {
+		if (!this.shouldConnectAutomatically(id, generation)) return
+		if (await this.connectSuite(id, true, generation)) {
+			this.automaticAttempts.delete(id)
+			return
 		}
-		this.log('warn', `Suite ${suiteNumber(id)}: maximum reconnection attempts reached`)
+		// Missing IP is a config error; retrying cannot succeed until configUpdated().
+		if (!this.config.host || !this.shouldConnectAutomatically(id, generation)) return
+		const failures = (this.automaticAttempts.get(id) ?? 0) + 1
+		this.automaticAttempts.set(id, failures)
+		const retries = maximumRetries(this.config)
+		if (failures === retries + 1)
+			this.log(
+				'warn',
+				`Suite ${suiteNumber(id)}: maximum reconnection attempts reached; retrying every ${SLOW_RETRY_MS / 1000} s`,
+			)
+		const timer = setTimeout(
+			() => {
+				this.automaticRetryTimers.delete(id)
+				if (this.shouldConnectAutomatically(id, generation)) this.queueAutomaticConnect(id)
+			},
+			failures <= retries ? FAST_RETRY_MS : SLOW_RETRY_MS,
+		)
+		this.automaticRetryTimers.set(id, timer)
+	}
+
+	private clearAutomaticRetry(id: SuiteId): void {
+		clearTimeout(this.automaticRetryTimers.get(id))
+		this.automaticRetryTimers.delete(id)
+		this.automaticAttempts.delete(id)
+	}
+
+	private clearAutomaticRetries(): void {
+		for (const id of SUITES) this.clearAutomaticRetry(id)
 	}
 
 	send(command: () => CommandResult): void {
@@ -705,19 +739,23 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 						: 'No suites connected',
 			)
 		}
-		this.setVariableValues(
-			Object.fromEntries(
-				SUITES.flatMap((id) => {
-					const n = suiteNumber(id),
-						state = this.suiteStates[id]
-					return [
-						[`suite${n}_connection_status`, state.status],
-						[`suite${n}_protocol`, state.protocolName],
-						[`suite${n}_frame_version`, state.frameVersion],
-					]
-				}),
-			),
+		const values = Object.fromEntries(
+			SUITES.flatMap((id) => {
+				const n = suiteNumber(id),
+					state = this.suiteStates[id]
+				return [
+					[`suite${n}_connection_status`, state.status],
+					[`suite${n}_protocol`, state.protocolName],
+					[`suite${n}_frame_version`, state.frameVersion],
+				]
+			}),
 		)
+		// Feedbacks below depend on connection state only through these values and
+		// the connection phase; redraw every button only when one of them changed.
+		const published = JSON.stringify([values, SUITES.map((id) => this.suiteStates[id].connectionPhase ?? '')])
+		if (published === this.publishedRuntimeState) return
+		this.publishedRuntimeState = published
+		this.setVariableValues(values)
 		this.checkFeedbacks(
 			'connected',
 			'connection_state',
