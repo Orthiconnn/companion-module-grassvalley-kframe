@@ -1,11 +1,26 @@
 import { Regex, type SomeCompanionConfigField } from '@companion-module/base'
-import { DEFAULT_CONFIG } from './udp/types.js'
 
-export interface ModuleConfig {
+export type ModuleConfig = {
 	host: string
-	keepaliveInterval: number
+	suite1: boolean
+	suite2: boolean
+	suite3: boolean
+	suite4: boolean
 	maxRetries: number
-	suite: string
+}
+
+export const DEFAULT_MAX_RETRIES = 5
+
+export function suiteEnabled(config: Partial<ModuleConfig>, suite: number): boolean {
+	const value = config[`suite${suite}` as keyof ModuleConfig]
+	return typeof value === 'boolean' ? value : suite === 1
+}
+
+export function maximumRetries(config: Partial<ModuleConfig>): number {
+	// Blank, null, or boolean legacy values mean "unset", not 0 retries.
+	const raw: unknown = config.maxRetries
+	const value = typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : NaN
+	return Number.isFinite(value) ? Math.max(0, Math.min(20, Math.trunc(value))) : DEFAULT_MAX_RETRIES
 }
 
 export function GetConfigFields(): SomeCompanionConfigField[] {
@@ -13,47 +28,26 @@ export function GetConfigFields(): SomeCompanionConfigField[] {
 		{
 			type: 'textinput',
 			id: 'host',
-			label: 'K-Frame IP Address',
-			width: 6,
+			label: 'Frame IP Address',
+			width: 12,
 			regex: Regex.IP,
-			required: true,
 		},
-		{
-			type: 'dropdown',
-			id: 'suite',
-			label: 'Default Suite Name',
+		...([1, 2, 3, 4] as const).map((suite): SomeCompanionConfigField => ({
+			type: 'checkbox',
+			id: `suite${suite}`,
+			label: `Suite ${suite}`,
 			width: 3,
-			choices: [
-				{ id: 'suite1a', label: '1a' },
-				{ id: 'suite1b', label: '1b' },
-				{ id: 'suite2a', label: '2a' },
-				{ id: 'suite2b', label: '2b' },
-				{ id: 'suite3a', label: '3a' },
-				{ id: 'suite3b', label: '3b' },
-				{ id: 'suite4a', label: '4a' },
-				{ id: 'suite4b', label: '4b' },
-			],
-			default: 'suite1a',
-		},
-		{
-			type: 'number',
-			id: 'keepaliveInterval',
-			label: 'Keepalive Interval (ms)',
-			width: 3,
-			min: 500,
-			max: 10000,
-			default: DEFAULT_CONFIG.KEEPALIVE_INTERVAL,
-			required: true,
-		},
+			default: suite === 1,
+		})),
 		{
 			type: 'number',
 			id: 'maxRetries',
-			label: 'Max Reconnection Attempts',
-			width: 3,
-			min: 1,
+			label: 'Quick Reconnection Attempts',
+			tooltip: 'Attempts 2 s apart after a suite drops. After these, the module keeps trying every 30 s.',
+			width: 4,
+			default: DEFAULT_MAX_RETRIES,
+			min: 0,
 			max: 20,
-			default: DEFAULT_CONFIG.MAX_RETRIES,
-			required: true,
 		},
 	]
 }

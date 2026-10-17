@@ -1,99 +1,45 @@
-## GrassValley K-Frame
+# Grass Valley KFrame
 
-This module allows you to control GrassValley K-Frame video production systems via UDP protocol.
+Companion module by Brad Shaffer / Orthicon for controlling Grass Valley K-Frame, X-Frame and XP-Frame production switchers (Kayenne, Karrera and Korona control panels) through the CPL protocol.
 
-### Configuration
+It grew out of Brad Shaffer's original Grass Valley Stream Deck integration (Orthicon, 2025) and uses the same protocol engine.
 
-1. **K-Frame IP Address**: Enter the IP address of your K-Frame system
-2. **Suite**: Select the suite number (1-4) corresponding to your K-Frame configuration
-3. **Keepalive Interval**: How often to send heartbeat messages in milliseconds (default: 2000)
-4. **Max Reconnection Attempts**: Number of retry attempts if connection is lost (default: 5)
+## Configuration
 
-### Connection Status
+The only network setting is the frame IP address. The local UDP ports are fixed in code and cannot be changed by the user: 6132/6133 for Suite 1, 6134/6135 for Suite 2, 6136/6137 for Suite 3, and 6138/6139 for Suite 4. Because the ports are fixed, use one connection of this module per Companion.
 
-The module will automatically connect when you enable it with a valid IP address configured.
+Enter the frame IP, select any combination of Suites 1–4, and set the number of quick reconnection attempts. Selected suites connect automatically, one at a time, because the frame accepts one connection handshake from a computer at a time. If a suite cannot connect it waits its turn behind the other suites, retries 2 s apart for the configured number of quick attempts, then keeps retrying every 30 s until the frame answers. The protocol keepalive timing is fixed internally. Each suite's optional Connect / Disconnect button changes from red **Disconnected**, through amber **Connecting** (Establishing, then Handshake), to green **Connected**, and displays live heartbeat activity. Every operational action and feedback includes its own suite selection.
 
-- **Green**: Connected to K-Frame
-- **Yellow**: Connecting or reconnecting
-- **Red**: Disconnected
+### Upgrading from Grass Valley K-Frame 1.0.0
 
-### Actions
+This module is the next version of the Grass Valley K-Frame module, so existing connections update in place. Existing Macro Recall and AUX Route actions are migrated to the new action format, including their selected suite, numeric values, and Companion expressions/variables. Their former send-pulse feedbacks are replaced with live frame-name and button-tally feedbacks. The connection's IP address is preserved, and the `last_macro`, `last_aux` and `last_aux_source` variables are still published.
 
-#### Macro Recall
+K-Frame 1.0.0's configured suite becomes the initially selected suite. This module connects the A side of Suites 1–4, so a 1.0.0 connection set to a B suite (for example 3B) moves to the matching A suite (3A). K-Frame 1.0.0 used local UDP ports 6130/6131; update any firewall rule that allowed only those ports. Additional suites can be enabled with the Suite 1–4 checkboxes. The optional **Suite Connect / Disconnect** presets provide manual control without changing the configured startup selection.
 
-Trigger a macro on the K-Frame.
+The upgrade runs automatically when Companion loads the new version; users do not run a separate migration command. Existing page positions and supported Macro/AUX action values are preserved. Companion upgrade scripts cannot replace an existing button's layered artwork, so upgraded buttons keep their former look. Add a new preset when the full suite badge, automatic frame-name label, and tally styling are desired.
 
-- **Macro Number**: Enter a number between 1 and 999
+## Controls
 
-#### AUX Route
+Native actions cover connection, macros, AUX routing, crosspoints, E-MEM, transitions, panel memory, Image Store, timeline RUN, GPI, PBUS recall/trigger, and panel button mapping. An advanced raw-CPL action is included for engineering and protocol testing.
 
-Route a video source to an AUX bus.
+Connection and macro-active feedbacks, connection variables, and Stream Deck-inspired defaults are included for Macro 1–8, AUX 1–4, E-MEM, Image Store, RUN, recall, trigger, and GPI workflows.
 
-- **AUX Number**: The AUX bus number (1-96)
-- **Source Number**: The source to route (1-850)
+New preset buttons use **Border when pressed**. Their status icons follow Companion's global button-appearance setting; set that global option to **Show all** when all button status icons should always be visible.
 
-### Feedbacks
+Macro presets show the selected suite as a circled number in the lower-left. When connected, Macro action dropdowns and automatic button labels use the frame's Macro catalog names. Changing the Macro or Suite field refreshes the button label. Disable **Automatically show frame Macro name** on that feedback when using custom button text.
 
-#### Connection Status
+All suite-targeted action presets use the same padded lower-left suite badge, which follows the Suite field on the button action. AUX defaults provide AUX 1–4 on Source 1. Crosspoint defaults provide A and B sides for M/E 1–4 and Program on Source 1, using brighter A-side and darker B-side family colors. Transition defaults use the matching family colors and provide M/E 1–4 plus Program CUT and AUTO targeting both primary and secondary. E-MEM defaults include a white Master E-MEM 0 button and color-coded Primary/Secondary E-MEM 0 buttons for M/E 1–4 plus red Program Primary/Secondary buttons. PBUS Recall and Trigger defaults cover PBUS devices 1–8 at Register/Trigger 0 in their own section. GPI defaults cover GPI 1–32 in a separate section. Image Store defaults cover Outputs 1–10 at Image 0001. Button Mapping defaults cover Buttons 1–3 on Shifts 1–4 for M/E 1–4 and Program, all mapped to Source 1. Panel Memory defaults cover Registers 1–8.
 
-Changes button appearance based on connection state. You can set it to trigger on:
+When a suite is connected, the module subscribes to the frame's source catalog. AUX and Crosspoint actions then offer searchable source dropdowns using the frame's source numbers and names. A numeric source may still be entered manually while offline or when a source is not present in the catalog. Source 1 labels in the preset browser refresh to use the discovered frame name when available; buttons already placed on a page remain user-editable copies. If connected suites disagree about a source name, the lowest-numbered connected suite supplies the dropdown label while the numeric source ID remains authoritative.
 
-- Connected
-- Connecting
-- Handshaking
-- Reconnecting
-- Disconnected
+AUX presets automatically follow their action's AUX and Source fields. Their labels show the live source number/name, and they turn light purple while that source is online on the selected AUX bus. Disable **Automatically show frame Source name and number** on the AUX feedback to preserve custom button text.
 
-#### Macro Sent
+Macro Stop All uses the K-Frame all-macros Stop event and also stops macros paused at a User Wait.
 
-Briefly activates when a macro command is sent. Can filter by specific macro number or any macro (set to 0).
+## Safety
 
-#### AUX Sent
-
-Briefly activates when an AUX route command is sent. Can filter by specific AUX number or any AUX (set to 0).
-
-### Presets
-
-The module includes ready-to-use presets:
-
-- **Connection Status**: A button that shows the current connection state with color coding
-- **Macro 1-10**: Quick access buttons for the first 10 macros
-- **AUX Route Template**: A template button for AUX routing (customize the numbers)
-
-### Troubleshooting
-
-**Module won't connect:**
-
-- Verify the K-Frame IP address is correct
-- Check that the K-Frame is powered on and network accessible
-- Ensure no firewall is blocking UDP ports 5000, 5001, 6130, 6131
-
-**Commands not working:**
-
-- Check the connection status is green (connected)
-- Verify the macro/AUX numbers are valid for your K-Frame configuration
-
-**Connection drops frequently:**
-
-- Try increasing the Keepalive Interval
-- Check network stability between Companion and K-Frame
-- Increase Max Reconnection Attempts if needed
-
-### Network Requirements
-
-The module uses the following UDP ports:
-
-- **5000**: Initial connection to K-Frame
-- **5001+**: Dynamic port assigned by K-Frame for commands
-- **6130**: Module's main socket
-- **6131**: Module's listener socket
-
-Ensure these ports are not blocked by firewalls.
-
-### Disclaimer
-
-This plugin is not affiliated with Grass Valley®. Grass Valley® is a registered trademark of its respective owner. The User agrees to indemnify and hold harmless the Developer from all claims, damages, or liabilities arising from use of this Software with any Grass Valley® hardware or systems.
+Button Mapping changes the switcher panel mapping. PBUS Trigger sends a clear/select/fire/clear sequence. Confirm targets on a simulator or non-air system before using either action in production.
 
 ## Credits
 
-Based on the protocol implementation from [gv-macro-player-streamdeck](https://github.com/Orthiconnn/gv-macro-player-streamdeck).
+Thanks to: Seth Madway (testing)

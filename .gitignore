@@ -6,3 +6,6 @@ package-lock.json
 DEBUG-*
 /.yarn
 /.vscode
+.DS_Store
+/reference-screenshots/
+/test/simulator/

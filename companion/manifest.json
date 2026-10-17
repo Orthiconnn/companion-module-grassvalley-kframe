@@ -1,26 +1,27 @@
 {
+	"$schema": "../node_modules/@companion-module/base/assets/manifest.schema.json",
+	"type": "connection",
 	"id": "grassvalley-kframe",
-	"name": "GrassValley K-Frame Macro Player",
-	"shortname": "kframe ",
-	"description": "Control GrassValley K-Frame via UDP - Macros, AUX routing",
+	"name": "Grass Valley KFrame",
+	"shortname": "GV KFrame",
+	"description": "Control Grass Valley K-Frame, X-Frame and XP-Frame production switchers (Kayenne, Karrera and Korona panels) using the CPL protocol",
 	"version": "0.0.0",
 	"license": "MIT",
 	"repository": "git+https://github.com/bitfocus/companion-module-grassvalley-kframe.git",
 	"bugs": "https://github.com/bitfocus/companion-module-grassvalley-kframe/issues",
 	"maintainers": [
 		{
-			"name": "Vincent Berry",
-			"email": "vincentberry@outlook.fr"
+			"name": "Brad Shaffer (@orthicon)"
 		}
 	],
 	"runtime": {
 		"type": "node22",
 		"api": "nodejs-ipc",
-		"apiVersion": "1.12.0",
+		"apiVersion": "0.0.0",
 		"entrypoint": "../dist/main.js"
 	},
 	"legacyIds": [],
-	"manufacturer": "GrassValley",
-	"products": ["K-Frame"],
-	"keywords": ["grassvalley", "k-frame", "macro", "aux", "video", "broadcast"]
+	"manufacturer": "Grass Valley",
+	"products": ["K-Frame", "X-Frame", "XP-Frame", "Kayenne", "Karrera", "Korona"],
+	"keywords": ["switcher", "video", "broadcast", "CPL", "macro", "crosspoint"]
 }
