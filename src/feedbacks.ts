@@ -74,7 +74,7 @@ function labeledFace(
 	label: string,
 	color: number,
 ): CompanionAdvancedFeedbackResult {
-	if (!automaticLabel) return { png64: suiteBadge(button), pngalignment: 'left:bottom' }
+	if (!automaticLabel) return { png64: suiteBadge(button), pngalignment: 'center:bottom' }
 	return {
 		text: '',
 		png64: labeledButtonSvg(
@@ -95,7 +95,7 @@ function textFace(button: ButtonStyle, text: string | undefined): CompanionAdvan
 	return {
 		...(text === undefined ? {} : { text }),
 		png64: suiteBadge(button),
-		pngalignment: 'left:bottom',
+		pngalignment: 'center:bottom',
 		size: fontSize(button.textSize),
 	}
 }
@@ -529,7 +529,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				if (suites.size !== 1) return { png64: CLEAR_BADGE }
 				const [suite] = suites
 				const size = self.primarySuiteButton(feedback.controlId)?.textSize ?? assignments[0]?.textSize ?? 1
-				return { png64: SUITE_BADGES[suiteNumber(suite)], pngalignment: 'left:bottom', size: fontSize(size) }
+				return { png64: SUITE_BADGES[suiteNumber(suite)], pngalignment: 'center:bottom', size: fontSize(size) }
 			},
 		},
 	})

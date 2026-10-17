@@ -5,10 +5,10 @@ const SUITE_NUMBER_PATHS: Record<number, string> = {
 	4: 'M46 339 L46 304 L27 327 L52 327',
 }
 
-// Full-button SVG overlays are centered by Companion, unlike the standalone
-// badge used by macro buttons. Offset their badge left so every action lands
-// on the macro button's lower-left reference position.
-const LABELED_BADGE_X = -7
+// Every badge-bearing image is a 360x360 SVG drawn with 'center:bottom'
+// alignment, so the badge lands in the same lower-left spot on every button
+// (the macro buttons' position) whether or not Companion shows its top bar.
+const BADGE_X = 24
 
 const suiteBadgeGroup = (suite: number, x: number): string => `<g transform="translate(${x} -24)">
 		<circle cx="38" cy="322" r="31" fill="#050505" stroke="#00cfd5" stroke-width="6"/>
@@ -17,7 +17,7 @@ const suiteBadgeGroup = (suite: number, x: number): string => `<g transform="tra
 
 const badgeSvg = (suite: number): string => `
 <svg xmlns="http://www.w3.org/2000/svg" width="360" height="360" viewBox="0 0 360 360">
-	${suiteBadgeGroup(suite, 24)}
+	${suiteBadgeGroup(suite, BADGE_X)}
 </svg>`
 
 // XML 1.0 forbids most C0 controls and U+FFFE/U+FFFF; labels can carry them
@@ -73,7 +73,7 @@ export const labeledButtonSvg = (
 	const transitionStrip = transition?.active
 		? `<rect x="325" y="${(316 - transitionHeight).toFixed(2)}" width="30" height="${transitionHeight.toFixed(2)}" rx="3" fill="#98e700" stroke="#315f00" stroke-width="5"/>`
 		: ''
-	const suiteBadge = showSuite ? suiteBadgeGroup(suite, LABELED_BADGE_X) : ''
+	const suiteBadge = showSuite ? suiteBadgeGroup(suite, BADGE_X) : ''
 	return Buffer.from(
 		`
 <svg xmlns="http://www.w3.org/2000/svg" width="360" height="360" viewBox="0 0 360 360">
@@ -122,7 +122,7 @@ export const timelineProgressSvg = (
 		.join('')
 	const dotFill = paused ? '#ff8c00' : '#98e700'
 	const dotStroke = paused ? '#b84a00' : '#4c7300'
-	const suiteBadge = showSuite ? suiteBadgeGroup(suite, LABELED_BADGE_X) : ''
+	const suiteBadge = showSuite ? suiteBadgeGroup(suite, BADGE_X) : ''
 	return Buffer.from(
 		`
 <svg xmlns="http://www.w3.org/2000/svg" width="360" height="360" viewBox="0 0 360 360">
